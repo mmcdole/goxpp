@@ -2,6 +2,8 @@ package xpp
 
 import (
 	"encoding/xml"
+	"errors"
+	"fmt"
 	"io"
 )
 
@@ -21,11 +23,9 @@ const (
 )
 
 type XMLPullParser struct {
-	Depth int
-
-	// Current Token State
-	Event       EventType
-	Attrs       xml.Attr
+	Depth       int
+	Event       XMLEventType
+	Attrs       []xml.Attr
 	Name        string
 	SpacePrefix string
 	Space       string
@@ -38,7 +38,7 @@ type XMLPullParser struct {
 func NewXMLPullParser(r io.Reader) *XMLPullParser {
 	d := xml.NewDecoder(r)
 	d.Strict = false
-	return &XMLPullParser{decoder: d, TokenType: StartDocument, Depth: 0}
+	return &XMLPullParser{decoder: d, token: StartDocument, Depth: 0}
 }
 
 func (p *XMLPullParser) NextTag() (event XMLEventType, err error) {
@@ -84,26 +84,27 @@ func (p *XMLPullParser) NextToken() (event XMLEventType, err error) {
 		// but we want to return it as a valid
 		// EndDocument token instead
 		p.token = nil
-		return p.processEndDocument(), nil
+		p.processEndDocument()
+		return p.Event, nil
 	}
 
 	p.token = xml.CopyToken(tok)
 	switch tt := p.token.(type) {
 	case xml.StartElement:
-		event = p.processStartToken(tt)
+		p.processStartToken(tt)
 	case xml.EndElement:
-		event = p.processEndToken(tt)
+		p.processEndToken(tt)
 	case xml.CharData:
-		event = p.processTextToken(tt)
+		p.processTextToken(tt)
 	case xml.Comment:
-		event = p.processCommentToken(tt)
+		p.processCommentToken(tt)
 	case xml.ProcInst:
-		event = p.processProcInstToken(tt)
+		p.processProcInstToken(tt)
 	case xml.Directive:
-		event = p.processDirectiveToken(tt)
+		p.processDirectiveToken(tt)
 	}
 
-	return event, nil
+	return p.Event, nil
 }
 
 func (p *XMLPullParser) NextText() (string, error) {
@@ -118,7 +119,7 @@ func (p *XMLPullParser) NextText() (string, error) {
 
 	if t == Text {
 		result := p.Text
-		nt, err = p.Next()
+		nt, err := p.Next()
 		if err != nil {
 			return "", err
 		}
@@ -151,49 +152,55 @@ func (p *XMLPullParser) Skip() error {
 	}
 }
 
-func (p *XMLPullParser) Attribute(name string) *xml.Attr {
-
+func (p *XMLPullParser) Attribute(name string) string {
+	for _, attr := range p.Attrs {
+		if attr.Name.Local == name {
+			return attr.Value
+		}
+	}
+	return ""
 }
 
 func (p *XMLPullParser) Matches(event XMLEventType, namespace *string, name *string) bool {
-	return p.Event == event && (namespace == nil || p.Namespace == namespace) && (name == nil || p.Name == name)
+	return p.Event == event && (namespace == nil || p.Space == *namespace) && (name == nil || p.Name == *name)
 }
 
-func (p *XMLPullParser) processStartToken(t *xml.StartElement) XMLEventType {
+func (p *XMLPullParser) processStartToken(t xml.StartElement) {
 	p.Depth++
 	p.Event = StartTag
 	p.Attrs = t.Attr
-	p.Name = t.Name
-	p.Space = t.Space
+	p.Name = t.Name.Local
+	p.Space = t.Name.Space
 }
 
-func (p *XMLPullParser) processEndToken(t *xml.EndElement) XMLEventType {
+func (p *XMLPullParser) processEndToken(t xml.EndElement) {
 	p.Depth--
 	p.Event = EndTag
-	p.Name = t.Name
+	p.Name = t.Name.Local
+
 }
 
-func (p *XMLPullParser) processTextToken(t *xml.CharData) XMLEventType {
+func (p *XMLPullParser) processTextToken(t xml.CharData) {
 	p.Event = Text
 	p.Text = string([]byte(t))
 }
 
-func (p *XMLPullParser) processCommentToken(t *xml.Comment) XMLEventType {
+func (p *XMLPullParser) processCommentToken(t xml.Comment) {
 	p.Event = Comment
 	p.Text = string([]byte(t))
 }
 
-func (p *XMLPullParser) processProcInstToken(t *xml.ProcInst) XMLEventType {
+func (p *XMLPullParser) processProcInstToken(t xml.ProcInst) {
 	p.Event = ProcessingInstruction
 	p.Text = fmt.Sprintf("%s %s", t.Target, string(t.Inst))
 }
 
-func (p *XMLPullParser) processDirectiveToken(t *xml.Directive) XMLEventType {
+func (p *XMLPullParser) processDirectiveToken(t xml.Directive) {
 	p.Event = Directive
 	p.Text = string([]byte(t))
 }
 
-func (p *XMLPullParser) processEndDocument() XMLEventType {
+func (p *XMLPullParser) processEndDocument() {
 	p.Event = EndDocument
 }
 
