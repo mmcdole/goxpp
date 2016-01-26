@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 )
 
 type XMLEventType int
@@ -18,7 +19,7 @@ const (
 	Comment
 	ProcessingInstruction
 	Directive
-	// TODO: IgnorableWhitespace ?
+	IgnorableWhitespace
 	// TODO: CDSECT ?
 )
 
@@ -48,7 +49,8 @@ func (p *XMLPullParser) NextTag() (event XMLEventType, err error) {
 	}
 
 	if t != StartTag && t != EndTag {
-		return event, errors.New("Expected StartTag or EndTag")
+		fmt.Printf("Whoops - got token %d - %s - %sxx\n", t, p.Name, p.Text)
+		return event, errors.New("Expected StartTag or EndTag.")
 	}
 
 	return t, nil
@@ -56,10 +58,11 @@ func (p *XMLPullParser) NextTag() (event XMLEventType, err error) {
 
 func (p *XMLPullParser) Next() (event XMLEventType, err error) {
 	for {
-		event, err := p.NextToken()
+		event, err = p.NextToken()
 		if err != nil {
 			return event, err
 		}
+
 		if event == StartTag ||
 			event == EndTag ||
 			event == Text ||
@@ -84,7 +87,7 @@ func (p *XMLPullParser) NextToken() (event XMLEventType, err error) {
 		// but we want to return it as a valid
 		// EndDocument token instead
 		p.token = nil
-		p.processEndDocument()
+		p.Event = EndDocument
 		return p.Event, nil
 	}
 
@@ -95,7 +98,7 @@ func (p *XMLPullParser) NextToken() (event XMLEventType, err error) {
 	case xml.EndElement:
 		p.processEndToken(tt)
 	case xml.CharData:
-		p.processTextToken(tt)
+		p.processCharDataToken(tt)
 	case xml.Comment:
 		p.processCommentToken(tt)
 	case xml.ProcInst:
@@ -103,6 +106,8 @@ func (p *XMLPullParser) NextToken() (event XMLEventType, err error) {
 	case xml.Directive:
 		p.processDirectiveToken(tt)
 	}
+
+	fmt.Printf("Consumed token: %d - %s\n", p.Event, p.token)
 
 	return p.Event, nil
 }
@@ -161,8 +166,12 @@ func (p *XMLPullParser) Attribute(name string) string {
 	return ""
 }
 
-func (p *XMLPullParser) Matches(event XMLEventType, namespace *string, name *string) bool {
-	return p.Event == event && (namespace == nil || p.Space == *namespace) && (name == nil || p.Name == *name)
+func (p *XMLPullParser) Matches(event XMLEventType, name string) bool {
+	return p.Event == event && p.Name == name
+}
+
+func (p *XMLPullParser) MatchesAll(event XMLEventType, namespace string, name string) bool {
+	return p.Event == event && p.Space == namespace && p.Name == name
 }
 
 func (p *XMLPullParser) processStartToken(t xml.StartElement) {
@@ -180,9 +189,14 @@ func (p *XMLPullParser) processEndToken(t xml.EndElement) {
 
 }
 
-func (p *XMLPullParser) processTextToken(t xml.CharData) {
-	p.Event = Text
+func (p *XMLPullParser) processCharDataToken(t xml.CharData) {
 	p.Text = string([]byte(t))
+	p.Event = Text
+	if p.isWhitespace() {
+		p.Event = IgnorableWhitespace
+	} else {
+		p.Event = Text
+	}
 }
 
 func (p *XMLPullParser) processCommentToken(t xml.Comment) {
@@ -200,13 +214,13 @@ func (p *XMLPullParser) processDirectiveToken(t xml.Directive) {
 	p.Text = string([]byte(t))
 }
 
-func (p *XMLPullParser) processEndDocument() {
-	p.Event = EndDocument
-}
-
 func (p *XMLPullParser) resetTokenState() {
 	p.Attrs = nil
 	p.Name = ""
 	p.Space = ""
 	p.Text = ""
+}
+
+func (p *XMLPullParser) isWhitespace() bool {
+	return strings.TrimSpace(p.Text) == ""
 }
