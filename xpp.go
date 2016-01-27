@@ -49,7 +49,6 @@ func (p *XMLPullParser) NextTag() (event XMLEventType, err error) {
 	}
 
 	if t != StartTag && t != EndTag {
-		fmt.Printf("Whoops - got token %d - %s - %sxx\n", t, p.Name, p.Text)
 		return event, errors.New("Expected StartTag or EndTag.")
 	}
 
@@ -106,8 +105,6 @@ func (p *XMLPullParser) NextToken() (event XMLEventType, err error) {
 	case xml.Directive:
 		p.processDirectiveToken(tt)
 	}
-
-	fmt.Printf("Consumed token: %d - %s\n", p.Event, p.token)
 
 	return p.Event, nil
 }
