@@ -24,13 +24,12 @@ const (
 )
 
 type XMLPullParser struct {
-	Depth       int
-	Event       XMLEventType
-	Attrs       []xml.Attr
-	Name        string
-	SpacePrefix string
-	Space       string
-	Text        string
+	Depth int
+	Event XMLEventType
+	Attrs []xml.Attr
+	Name  string
+	Space string
+	Text  string
 
 	decoder *xml.Decoder
 	token   interface{}
@@ -39,7 +38,11 @@ type XMLPullParser struct {
 func NewXMLPullParser(r io.Reader) *XMLPullParser {
 	d := xml.NewDecoder(r)
 	d.Strict = false
-	return &XMLPullParser{decoder: d, token: StartDocument, Depth: 0}
+	return &XMLPullParser{
+		decoder: d,
+		Event:   StartDocument,
+		Depth:   0,
+	}
 }
 
 func (p *XMLPullParser) NextTag() (event XMLEventType, err error) {
@@ -163,12 +166,15 @@ func (p *XMLPullParser) Attribute(name string) string {
 	return ""
 }
 
-func (p *XMLPullParser) Matches(event XMLEventType, name string) bool {
-	return p.Event == event && p.Name == name
+func (p *XMLPullParser) Expect(event XMLEventType, name string) (err error) {
+	return p.ExpectAll(event, "*", name)
 }
 
-func (p *XMLPullParser) MatchesAll(event XMLEventType, namespace string, name string) bool {
-	return p.Event == event && p.Space == namespace && p.Name == name
+func (p *XMLPullParser) ExpectAll(event XMLEventType, space string, name string) (err error) {
+	if !(p.Event == event && (p.Space == space || space == "*") && (p.Name == name || name == "*")) {
+		err = fmt.Errorf("Expected Space:%s Name:%s Event:%s but got Space:%s Name:%s Event:%s", space, name, p.eventName(event), p.Space, p.Name, p.eventName(p.Event))
+	}
+	return
 }
 
 func (p *XMLPullParser) processStartToken(t xml.StartElement) {
@@ -177,6 +183,7 @@ func (p *XMLPullParser) processStartToken(t xml.StartElement) {
 	p.Attrs = t.Attr
 	p.Name = t.Name.Local
 	p.Space = t.Name.Space
+
 }
 
 func (p *XMLPullParser) processEndToken(t xml.EndElement) {
@@ -220,4 +227,24 @@ func (p *XMLPullParser) resetTokenState() {
 
 func (p *XMLPullParser) isWhitespace() bool {
 	return strings.TrimSpace(p.Text) == ""
+}
+
+func (p *XMLPullParser) eventName(e XMLEventType) (name string) {
+	switch e {
+	case StartTag:
+		name = "StartTag"
+	case EndTag:
+		name = "EndTag"
+	case ProcessingInstruction:
+		name = "ProcessingInstruction"
+	case Directive:
+		name = "Directive"
+	case Comment:
+		name = "Comment"
+	case Text:
+		name = "Text"
+	case IgnorableWhitespace:
+		name = "IgnorableWhitespace"
+	}
+	return
 }
