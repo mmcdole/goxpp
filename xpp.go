@@ -19,7 +19,7 @@ const (
 	Comment
 	ProcessingInstruction
 	Directive
-	IgnorableWhitespace
+	IgnorableWhitespace // TODO: ?
 	// TODO: CDSECT ?
 )
 
@@ -31,8 +31,11 @@ type XMLPullParser struct {
 	Space string
 	Text  string
 
-	decoder *xml.Decoder
-	token   interface{}
+	decoder   *xml.Decoder
+	token     interface{}
+	peekToken interface{}
+	peekEvent XMLEventType
+	peekErr   error
 }
 
 func NewXMLPullParser(r io.Reader) *XMLPullParser {
@@ -65,9 +68,19 @@ func (p *XMLPullParser) Next() (event XMLEventType, err error) {
 			return event, err
 		}
 
+		if event == Text {
+			// Coalesce all contiguous text events together
+			text := p.Text
+			for p.peekEvent == Text {
+				p.NextToken()
+				text += p.Text
+			}
+			p.Text = text
+			break
+		}
+
 		if event == StartTag ||
 			event == EndTag ||
-			event == Text ||
 			event == EndDocument {
 			break
 		}
@@ -79,35 +92,30 @@ func (p *XMLPullParser) NextToken() (event XMLEventType, err error) {
 	// Clear any state held for the previous token
 	p.resetTokenState()
 
-	tok, err := p.decoder.Token()
+	if p.peekErr != nil {
+		return event, p.peekErr
+	}
+
+	p.Event = p.peekEvent
+	p.token = p.peekToken
+	p.processToken(p.token)
+
+	// Set peek token to allow token lookahead
+	peekToken, err := p.decoder.Token()
 	if err != nil {
 		if err != io.EOF {
-			return event, err
+			p.peekErr = err
 		}
 
 		// XML decoder returns the EOF as an error
 		// but we want to return it as a valid
 		// EndDocument token instead
-		p.token = nil
-		p.Event = EndDocument
-		return p.Event, nil
+		p.peekToken = nil
+		p.peekEvent = EndDocument
 	}
 
-	p.token = xml.CopyToken(tok)
-	switch tt := p.token.(type) {
-	case xml.StartElement:
-		p.processStartToken(tt)
-	case xml.EndElement:
-		p.processEndToken(tt)
-	case xml.CharData:
-		p.processCharDataToken(tt)
-	case xml.Comment:
-		p.processCommentToken(tt)
-	case xml.ProcInst:
-		p.processProcInstToken(tt)
-	case xml.Directive:
-		p.processDirectiveToken(tt)
-	}
+	p.peekToken = xml.CopyToken(peekToken)
+	p.peekEvent = p.eventType(peekToken)
 
 	return p.Event, nil
 }
@@ -177,34 +185,40 @@ func (p *XMLPullParser) ExpectAll(event XMLEventType, space string, name string)
 	return
 }
 
+func (p *XMLPullParser) processToken(t xml.Token) {
+	switch tt := t.(type) {
+	case xml.StartElement:
+		p.processStartToken(tt)
+	case xml.EndElement:
+		p.processEndToken(tt)
+	case xml.CharData:
+		p.processCharDataToken(tt)
+	case xml.Comment:
+		p.processCommentToken(tt)
+	case xml.ProcInst:
+		p.processProcInstToken(tt)
+	case xml.Directive:
+		p.processDirectiveToken(tt)
+	}
+}
+
 func (p *XMLPullParser) processStartToken(t xml.StartElement) {
 	p.Depth++
-	p.Event = StartTag
 	p.Attrs = t.Attr
 	p.Name = t.Name.Local
 	p.Space = t.Name.Space
-
 }
 
 func (p *XMLPullParser) processEndToken(t xml.EndElement) {
 	p.Depth--
-	p.Event = EndTag
 	p.Name = t.Name.Local
-
 }
 
 func (p *XMLPullParser) processCharDataToken(t xml.CharData) {
 	p.Text = string([]byte(t))
-	p.Event = Text
-	if p.isWhitespace() {
-		p.Event = IgnorableWhitespace
-	} else {
-		p.Event = Text
-	}
 }
 
 func (p *XMLPullParser) processCommentToken(t xml.Comment) {
-	p.Event = Comment
 	p.Text = string([]byte(t))
 }
 
@@ -214,7 +228,6 @@ func (p *XMLPullParser) processProcInstToken(t xml.ProcInst) {
 }
 
 func (p *XMLPullParser) processDirectiveToken(t xml.Directive) {
-	p.Event = Directive
 	p.Text = string([]byte(t))
 }
 
@@ -245,6 +258,24 @@ func (p *XMLPullParser) eventName(e XMLEventType) (name string) {
 		name = "Text"
 	case IgnorableWhitespace:
 		name = "IgnorableWhitespace"
+	}
+	return
+}
+
+func (p *XMLPullParser) eventType(t xml.Token) (event XMLEventType) {
+	switch t.(type) {
+	case xml.StartElement:
+		event = StartTag
+	case xml.EndElement:
+		event = EndTag
+	case xml.CharData:
+		event = Text
+	case xml.Comment:
+		event = Comment
+	case xml.ProcInst:
+		event = ProcessingInstruction
+	case xml.Directive:
+		event = Directive
 	}
 	return
 }
