@@ -71,7 +71,7 @@ func (p *XMLPullParser) Next() (event XMLEventType, err error) {
 		if event == Text {
 			// Coalesce all contiguous text events together
 			text := p.Text
-			for p.peekEvent == Text {
+			for p.peekEvent == Text && p.peekErr == nil {
 				p.NextToken()
 				text += p.Text
 			}
@@ -92,15 +92,23 @@ func (p *XMLPullParser) NextToken() (event XMLEventType, err error) {
 	// Clear any state held for the previous token
 	p.resetTokenState()
 
+	// If there was an error when peeking return it now
 	if p.peekErr != nil {
 		return event, p.peekErr
 	}
 
+	// If the peek token was EndDocument, dont bother
+	// retrieving any more tokens.  Just return EndDocument
+	if p.peekEvent == EndDocument {
+		return EndDocument, nil
+	}
+
+	// Switch peek token/event to the current token/event
 	p.Event = p.peekEvent
 	p.token = p.peekToken
 	p.processToken(p.token)
 
-	// Set peek token to allow token lookahead
+	// Peek the next token/event
 	peekToken, err := p.decoder.Token()
 	if err != nil {
 		if err != io.EOF {
@@ -113,10 +121,10 @@ func (p *XMLPullParser) NextToken() (event XMLEventType, err error) {
 		p.peekToken = nil
 		p.peekEvent = EndDocument
 	}
-
 	p.peekToken = xml.CopyToken(peekToken)
 	p.peekEvent = p.eventType(peekToken)
 
+	// Return current event (previously the peek token)
 	return p.Event, nil
 }
 
