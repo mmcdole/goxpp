@@ -51,38 +51,61 @@ func NewXMLPullParser(r io.Reader) *XMLPullParser {
 func (p *XMLPullParser) NextTag() (event XMLEventType, err error) {
 	t, err := p.Next()
 	if err != nil {
-		return
+		return event, err
+	}
+
+	if t == Text && p.isWhitespace() {
+		t, err = p.Next()
+		if err != nil {
+			return event, err
+		}
 	}
 
 	if t != StartTag && t != EndTag {
-		return event, errors.New("Expected StartTag or EndTag.")
+		return event, fmt.Errorf("Expected StartTag or EndTag but got %s", p.eventName(t))
 	}
 
 	return t, nil
 }
 
 func (p *XMLPullParser) Next() (event XMLEventType, err error) {
+	text := ""
+
 	for {
 		event, err = p.NextToken()
 		if err != nil {
 			return event, err
 		}
 
-		if event == Text {
-			// Coalesce all contiguous text events together
-			text := p.Text
-			for p.peekEvent == Text && p.peekErr == nil {
-				p.NextToken()
-				text += p.Text
-			}
-			p.Text = text
-			break
-		}
-
+		// Return immediately after encountering a StartTag
+		// EndTag or EndDocument
 		if event == StartTag ||
 			event == EndTag ||
 			event == EndDocument {
-			break
+			return event, nil
+		}
+
+		if event == Comment ||
+			event == Directive ||
+			event == ProcessingInstruction {
+			text = ""
+			continue
+		}
+
+		// Coalesce text event value
+		if event == Text {
+			text += p.Text
+		}
+
+		// Return the text event if it is going to be
+		// ended by a Start/EndTag or EndDocument.
+		// Otherwise we will continue to coalesce text
+		// events.
+		if text != "" && (p.peekEvent == StartTag ||
+			p.peekEvent == EndTag ||
+			p.peekEvent == EndDocument) {
+			p.Text = text
+			return Text, nil
 		}
 	}
 	return event, nil
@@ -92,15 +115,17 @@ func (p *XMLPullParser) NextToken() (event XMLEventType, err error) {
 	// Clear any state held for the previous token
 	p.resetTokenState()
 
-	// If there was an error when peeking return it now
 	if p.peekErr != nil {
 		return event, p.peekErr
 	}
 
-	// If the peek token was EndDocument, dont bother
-	// retrieving any more tokens.  Just return EndDocument
-	if p.peekEvent == EndDocument {
-		return EndDocument, nil
+	if p.Event == StartDocument {
+		// Preload the peek token when first starting
+		p.peekNextToken()
+	} else if p.Event == EndDocument {
+		// Always return EndDocument once that state has
+		// been reached.
+		return p.Event, nil
 	}
 
 	// Switch peek token/event to the current token/event
@@ -108,24 +133,29 @@ func (p *XMLPullParser) NextToken() (event XMLEventType, err error) {
 	p.token = p.peekToken
 	p.processToken(p.token)
 
-	// Peek the next token/event
-	peekToken, err := p.decoder.Token()
-	if err != nil {
-		if err != io.EOF {
-			p.peekErr = err
-		}
-
-		// XML decoder returns the EOF as an error
-		// but we want to return it as a valid
-		// EndDocument token instead
-		p.peekToken = nil
-		p.peekEvent = EndDocument
-	}
-	p.peekToken = xml.CopyToken(peekToken)
-	p.peekEvent = p.eventType(peekToken)
+	p.peekNextToken()
 
 	// Return current event (previously the peek token)
 	return p.Event, nil
+}
+
+func (p *XMLPullParser) peekNextToken() {
+	// Peek the next token/event
+	peekToken, err := p.decoder.Token()
+	if err != nil {
+		if err == io.EOF {
+			// XML decoder returns the EOF as an error
+			// but we want to return it as a valid
+			// EndDocument token instead
+			p.peekToken = nil
+			p.peekEvent = EndDocument
+		} else {
+			p.peekErr = err
+		}
+		return
+	}
+	p.peekToken = xml.CopyToken(peekToken)
+	p.peekEvent = p.eventType(peekToken)
 }
 
 func (p *XMLPullParser) NextText() (string, error) {
@@ -231,7 +261,6 @@ func (p *XMLPullParser) processCommentToken(t xml.Comment) {
 }
 
 func (p *XMLPullParser) processProcInstToken(t xml.ProcInst) {
-	p.Event = ProcessingInstruction
 	p.Text = fmt.Sprintf("%s %s", t.Target, string(t.Inst))
 }
 
@@ -256,6 +285,10 @@ func (p *XMLPullParser) eventName(e XMLEventType) (name string) {
 		name = "StartTag"
 	case EndTag:
 		name = "EndTag"
+	case StartDocument:
+		name = "StartDocument"
+	case EndDocument:
+		name = "EndDocument"
 	case ProcessingInstruction:
 		name = "ProcessingInstruction"
 	case Directive:
