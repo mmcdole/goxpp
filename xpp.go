@@ -24,8 +24,6 @@ const (
 )
 
 type XMLPullParser struct {
-	Decoder *xml.Decoder
-
 	// Document State
 	Spaces map[string]string
 
@@ -37,16 +35,18 @@ type XMLPullParser struct {
 	Space string
 	Text  string
 
+	decoder   *xml.Decoder
 	token     interface{}
 	peekToken interface{}
 	peekEvent XMLEventType
 	peekErr   error
 }
 
-func NewXMLPullParser(r io.Reader) *XMLPullParser {
+func NewXMLPullParser(r io.Reader, strict bool) *XMLPullParser {
 	d := xml.NewDecoder(r)
+	d.Strict = strict
 	return &XMLPullParser{
-		Decoder: d,
+		decoder: d,
 		Event:   StartDocument,
 		Depth:   0,
 		Spaces:  map[string]string{},
@@ -146,7 +146,7 @@ func (p *XMLPullParser) NextToken() (event XMLEventType, err error) {
 
 func (p *XMLPullParser) peekNextToken() {
 	// Peek the next token/event
-	peekToken, err := p.Decoder.Token()
+	peekToken, err := p.decoder.Token()
 	if err != nil {
 		if err == io.EOF {
 			// XML decoder returns the EOF as an error
@@ -226,6 +226,30 @@ func (p *XMLPullParser) ExpectAll(event XMLEventType, space string, name string)
 		err = fmt.Errorf("Expected Space:%s Name:%s Event:%s but got Space:%s Name:%s Event:%s", space, name, p.eventName(event), p.Space, p.Name, p.eventName(p.Event))
 	}
 	return
+}
+
+func (p *XMLPullParser) DecodeElement(v interface{}) error {
+	if p.Event != StartTag {
+		return errors.New("DecodeElement can only be called from a StartTag event")
+	}
+
+	// Consumes all tokens until the matching end token.
+	err := p.decoder.DecodeElement(v, p.token)
+	if err != nil {
+		return err
+	}
+
+	name := p.Name
+
+	// Need to set the "current" token name/event
+	// to the previous StartTag event's name
+	p.resetTokenState()
+	p.Event = EndTag
+	p.Name = name
+	p.token = nil
+
+	// Need to peek the next token
+	p.peekNextToken()
 }
 
 func (p *XMLPullParser) processToken(t xml.Token) {
