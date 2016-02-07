@@ -24,6 +24,12 @@ const (
 )
 
 type XMLPullParser struct {
+	Decoder *xml.Decoder
+
+	// Document State
+	Spaces map[string]string
+
+	// Token State
 	Depth int
 	Event XMLEventType
 	Attrs []xml.Attr
@@ -31,7 +37,6 @@ type XMLPullParser struct {
 	Space string
 	Text  string
 
-	decoder   *xml.Decoder
 	token     interface{}
 	peekToken interface{}
 	peekEvent XMLEventType
@@ -40,11 +45,11 @@ type XMLPullParser struct {
 
 func NewXMLPullParser(r io.Reader) *XMLPullParser {
 	d := xml.NewDecoder(r)
-	d.Strict = false
 	return &XMLPullParser{
-		decoder: d,
+		Decoder: d,
 		Event:   StartDocument,
 		Depth:   0,
+		Spaces:  map[string]string{},
 	}
 }
 
@@ -141,7 +146,7 @@ func (p *XMLPullParser) NextToken() (event XMLEventType, err error) {
 
 func (p *XMLPullParser) peekNextToken() {
 	// Peek the next token/event
-	peekToken, err := p.decoder.Token()
+	peekToken, err := p.Decoder.Token()
 	if err != nil {
 		if err == io.EOF {
 			// XML decoder returns the EOF as an error
@@ -245,6 +250,7 @@ func (p *XMLPullParser) processStartToken(t xml.StartElement) {
 	p.Attrs = t.Attr
 	p.Name = t.Name.Local
 	p.Space = t.Name.Space
+	p.trackNamespaces(t)
 }
 
 func (p *XMLPullParser) processEndToken(t xml.EndElement) {
@@ -319,4 +325,17 @@ func (p *XMLPullParser) eventType(t xml.Token) (event XMLEventType) {
 		event = Directive
 	}
 	return
+}
+
+func (p *XMLPullParser) trackNamespaces(t xml.StartElement) {
+	for _, attr := range t.Attr {
+		if attr.Name.Space == "xmlns" {
+			space := strings.TrimSpace(attr.Value)
+			spacePrefix := strings.TrimSpace(strings.ToLower(attr.Name.Local))
+			p.Spaces[space] = spacePrefix
+		} else if attr.Name.Local == "xmlns" {
+			space := strings.TrimSpace(attr.Value)
+			p.Spaces[space] = ""
+		}
+	}
 }
