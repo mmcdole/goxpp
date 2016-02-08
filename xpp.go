@@ -35,11 +35,8 @@ type XMLPullParser struct {
 	Space string
 	Text  string
 
-	decoder   *xml.Decoder
-	token     interface{}
-	peekToken interface{}
-	peekEvent XMLEventType
-	peekErr   error
+	decoder *xml.Decoder
+	token   interface{}
 }
 
 func NewXMLPullParser(r io.Reader, strict bool) *XMLPullParser {
@@ -59,7 +56,7 @@ func (p *XMLPullParser) NextTag() (event XMLEventType, err error) {
 		return event, err
 	}
 
-	if t == Text && p.isWhitespace() {
+	for t == Text && p.IsWhitespace() {
 		t, err = p.Next()
 		if err != nil {
 			return event, err
@@ -67,15 +64,13 @@ func (p *XMLPullParser) NextTag() (event XMLEventType, err error) {
 	}
 
 	if t != StartTag && t != EndTag {
-		return event, fmt.Errorf("Expected StartTag or EndTag but got %s", p.eventName(t))
+		return event, fmt.Errorf("Expected StartTag or EndTag but got %s", p.EventName(t))
 	}
 
 	return t, nil
 }
 
 func (p *XMLPullParser) Next() (event XMLEventType, err error) {
-	text := ""
-
 	for {
 		event, err = p.NextToken()
 		if err != nil {
@@ -83,34 +78,19 @@ func (p *XMLPullParser) Next() (event XMLEventType, err error) {
 		}
 
 		// Return immediately after encountering a StartTag
-		// EndTag or EndDocument
+		// EndTag, Text, EndDocument
 		if event == StartTag ||
 			event == EndTag ||
-			event == EndDocument {
+			event == EndDocument ||
+			event == Text {
 			return event, nil
 		}
 
+		// Skip Comment/Directive and ProcessingInstruction
 		if event == Comment ||
 			event == Directive ||
 			event == ProcessingInstruction {
-			text = ""
 			continue
-		}
-
-		// Coalesce text event value
-		if event == Text {
-			text += p.Text
-		}
-
-		// Return the text event if it is going to be
-		// ended by a Start/EndTag or EndDocument.
-		// Otherwise we will continue to coalesce text
-		// events.
-		if text != "" && (p.peekEvent == StartTag ||
-			p.peekEvent == EndTag ||
-			p.peekEvent == EndDocument) {
-			p.Text = text
-			return Text, nil
 		}
 	}
 	return event, nil
@@ -120,47 +100,24 @@ func (p *XMLPullParser) NextToken() (event XMLEventType, err error) {
 	// Clear any state held for the previous token
 	p.resetTokenState()
 
-	if p.peekErr != nil {
-		return event, p.peekErr
-	}
-
-	if p.Event == StartDocument {
-		// Preload the peek token when first starting
-		p.peekNextToken()
-	} else if p.Event == EndDocument {
-		// Always return EndDocument once that state has
-		// been reached.
-		return p.Event, nil
-	}
-
-	// Switch peek token/event to the current token/event
-	p.Event = p.peekEvent
-	p.token = p.peekToken
-	p.processToken(p.token)
-
-	p.peekNextToken()
-
-	// Return current event (previously the peek token)
-	return p.Event, nil
-}
-
-func (p *XMLPullParser) peekNextToken() {
-	// Peek the next token/event
-	peekToken, err := p.decoder.Token()
+	token, err := p.decoder.Token()
 	if err != nil {
 		if err == io.EOF {
 			// XML decoder returns the EOF as an error
 			// but we want to return it as a valid
 			// EndDocument token instead
-			p.peekToken = nil
-			p.peekEvent = EndDocument
-		} else {
-			p.peekErr = err
+			p.token = nil
+			p.Event = EndDocument
+			return p.Event, nil
 		}
-		return
+		return event, err
 	}
-	p.peekToken = xml.CopyToken(peekToken)
-	p.peekEvent = p.eventType(peekToken)
+
+	p.token = xml.CopyToken(token)
+	p.processToken(p.token)
+	p.Event = p.EventType(p.token)
+
+	return p.Event, nil
 }
 
 func (p *XMLPullParser) NextText() (string, error) {
@@ -222,8 +179,8 @@ func (p *XMLPullParser) Expect(event XMLEventType, name string) (err error) {
 }
 
 func (p *XMLPullParser) ExpectAll(event XMLEventType, space string, name string) (err error) {
-	if !(p.Event == event && (p.Space == space || space == "*") && (p.Name == name || name == "*")) {
-		err = fmt.Errorf("Expected Space:%s Name:%s Event:%s but got Space:%s Name:%s Event:%s", space, name, p.eventName(event), p.Space, p.Name, p.eventName(p.Event))
+	if !(p.Event == event && (strings.ToLower(p.Space) == strings.ToLower(space) || space == "*") && (strings.ToLower(p.Name) == strings.ToLower(name) || name == "*")) {
+		err = fmt.Errorf("Expected Space:%s Name:%s Event:%s but got Space:%s Name:%s Event:%s", space, name, p.EventName(event), p.Space, p.Name, p.EventName(p.Event))
 	}
 	return
 }
@@ -233,8 +190,12 @@ func (p *XMLPullParser) DecodeElement(v interface{}) error {
 		return errors.New("DecodeElement can only be called from a StartTag event")
 	}
 
+	//tok := &p.token
+
+	startToken := p.token.(xml.StartElement)
+
 	// Consumes all tokens until the matching end token.
-	err := p.decoder.DecodeElement(v, p.token)
+	err := p.decoder.DecodeElement(v, &startToken)
 	if err != nil {
 		return err
 	}
@@ -247,9 +208,53 @@ func (p *XMLPullParser) DecodeElement(v interface{}) error {
 	p.Event = EndTag
 	p.Name = name
 	p.token = nil
+	return nil
+}
 
-	// Need to peek the next token
-	p.peekNextToken()
+func (p *XMLPullParser) IsWhitespace() bool {
+	return strings.TrimSpace(p.Text) == ""
+}
+
+func (p *XMLPullParser) EventName(e XMLEventType) (name string) {
+	switch e {
+	case StartTag:
+		name = "StartTag"
+	case EndTag:
+		name = "EndTag"
+	case StartDocument:
+		name = "StartDocument"
+	case EndDocument:
+		name = "EndDocument"
+	case ProcessingInstruction:
+		name = "ProcessingInstruction"
+	case Directive:
+		name = "Directive"
+	case Comment:
+		name = "Comment"
+	case Text:
+		name = "Text"
+	case IgnorableWhitespace:
+		name = "IgnorableWhitespace"
+	}
+	return
+}
+
+func (p *XMLPullParser) EventType(t xml.Token) (event XMLEventType) {
+	switch t.(type) {
+	case xml.StartElement:
+		event = StartTag
+	case xml.EndElement:
+		event = EndTag
+	case xml.CharData:
+		event = Text
+	case xml.Comment:
+		event = Comment
+	case xml.ProcInst:
+		event = ProcessingInstruction
+	case xml.Directive:
+		event = Directive
+	}
+	return
 }
 
 func (p *XMLPullParser) processToken(t xml.Token) {
@@ -303,52 +308,6 @@ func (p *XMLPullParser) resetTokenState() {
 	p.Name = ""
 	p.Space = ""
 	p.Text = ""
-}
-
-func (p *XMLPullParser) isWhitespace() bool {
-	return strings.TrimSpace(p.Text) == ""
-}
-
-func (p *XMLPullParser) eventName(e XMLEventType) (name string) {
-	switch e {
-	case StartTag:
-		name = "StartTag"
-	case EndTag:
-		name = "EndTag"
-	case StartDocument:
-		name = "StartDocument"
-	case EndDocument:
-		name = "EndDocument"
-	case ProcessingInstruction:
-		name = "ProcessingInstruction"
-	case Directive:
-		name = "Directive"
-	case Comment:
-		name = "Comment"
-	case Text:
-		name = "Text"
-	case IgnorableWhitespace:
-		name = "IgnorableWhitespace"
-	}
-	return
-}
-
-func (p *XMLPullParser) eventType(t xml.Token) (event XMLEventType) {
-	switch t.(type) {
-	case xml.StartElement:
-		event = StartTag
-	case xml.EndElement:
-		event = EndTag
-	case xml.CharData:
-		event = Text
-	case xml.Comment:
-		event = Comment
-	case xml.ProcInst:
-		event = ProcessingInstruction
-	case xml.Directive:
-		event = Directive
-	}
-	return
 }
 
 func (p *XMLPullParser) trackNamespaces(t xml.StartElement) {
