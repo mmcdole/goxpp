@@ -2,7 +2,7 @@
 
 [![Build Status](https://travis-ci.org/mmcdole/goxpp.svg?branch=master)](https://travis-ci.org/mmcdole/goxpp) [![Coverage Status](https://coveralls.io/repos/github/mmcdole/goxpp/badge.svg?branch=master)](https://coveralls.io/github/mmcdole/goxpp?branch=master) [![License](http://img.shields.io/:license-mit-blue.svg)](http://doge.mit-license.org)
 
-The `goxpp` library is an XML parser library that is loosely based on the [Android XMLPullParser](http://developer.android.com/reference/org/xmlpull/v1/XmlPullParser.html).  This library allows you to easily implement a pull parser for arbitary XML content.  You can think of `goxpp` as a lightweight wrapper around Go's XML `Decoder` that provides a set of functions that make it easier to parse XML content than using the raw decoder itself.
+The `goxpp` library is an XML parser library that is loosely based on the [Java XMLPullParser](http://www.xmlpull.org/v1/download/unpacked/doc/quick_intro.html).  This library allows you to easily implement a pull parser for arbitary XML content.  You can think of `goxpp` as a lightweight wrapper around Go's XML `Decoder` that provides a set of functions that make it easier to parse XML content than using the raw decoder itself.
 
 ## Table of Contents
 - [Description](#description)
@@ -14,9 +14,9 @@ The `goxpp` library is an XML parser library that is loosely based on the [Andro
 
 ## Description
 
-##### What is pull parsing vs push parsing?
+##### What is pull parsing?
 
-TODO
+
 
 ##### When would you want to use `goxpp` over the standard library?
 
@@ -36,7 +36,7 @@ TODO
 
 ## License
 
-TODO
+This project is licensed under the [MIT License](https://raw.githubusercontent.com/mmcdole/goxpp/master/LICENSE)
 
 ## Credits
 
