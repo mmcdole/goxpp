@@ -130,23 +130,25 @@ func (p *XMLPullParser) NextText() (string, error) {
 		return "", err
 	}
 
-	if t == Text {
-		result := p.Text
-		nt, err := p.Next()
+	if t != EndTag && t != Text {
+		return "", errors.New("Parser must be on EndTag or Text to read text")
+	}
+
+	var result string
+	for t == Text {
+		result = result + p.Text
+		t, err = p.Next()
 		if err != nil {
 			return "", err
 		}
 
-		if nt != EndTag {
-			return "", errors.New("Event Text must be immediately followed by EndTag")
+		if t != EndTag && t != Text {
+			errstr := fmt.Sprintf("Event Text must be immediately followed by EndTag or Text but got %s", p.EventName(t))
+			return "", errors.New(errstr)
 		}
-
-		return result, nil
-	} else if t == EndTag {
-		return "", nil
-	} else {
-		return "", errors.New("Parser must be on StartTag or Text to read text")
 	}
+
+	return result, nil
 }
 
 func (p *XMLPullParser) Skip() error {
