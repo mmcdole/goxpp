@@ -9,6 +9,7 @@ import (
 )
 
 type XMLEventType int
+type CharsetReader func(charset string, input io.Reader) (io.Reader, error)
 
 const (
 	StartDocument XMLEventType = iota
@@ -39,9 +40,10 @@ type XMLPullParser struct {
 	token   interface{}
 }
 
-func NewXMLPullParser(r io.Reader, strict bool) *XMLPullParser {
+func NewXMLPullParser(r io.Reader, strict bool, cr CharsetReader) *XMLPullParser {
 	d := xml.NewDecoder(r)
 	d.Strict = strict
+	d.CharsetReader = cr
 	return &XMLPullParser{
 		decoder: d,
 		Event:   StartDocument,
