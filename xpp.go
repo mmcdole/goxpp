@@ -66,7 +66,7 @@ func (p *XMLPullParser) NextTag() (event XMLEventType, err error) {
 	}
 
 	if t != StartTag && t != EndTag {
-		return event, fmt.Errorf("Expected StartTag or EndTag but got %s", p.EventName(t))
+		return event, fmt.Errorf("Expected StartTag or EndTag but got %s at offset: %d", p.EventName(t), p.decoder.InputOffset())
 	}
 
 	return t, nil
@@ -184,7 +184,7 @@ func (p *XMLPullParser) Expect(event XMLEventType, name string) (err error) {
 
 func (p *XMLPullParser) ExpectAll(event XMLEventType, space string, name string) (err error) {
 	if !(p.Event == event && (strings.ToLower(p.Space) == strings.ToLower(space) || space == "*") && (strings.ToLower(p.Name) == strings.ToLower(name) || name == "*")) {
-		err = fmt.Errorf("Expected Space:%s Name:%s Event:%s but got Space:%s Name:%s Event:%s", space, name, p.EventName(event), p.Space, p.Name, p.EventName(p.Event))
+		err = fmt.Errorf("Expected Space:%s Name:%s Event:%s but got Space:%s Name:%s Event:%s at offset: %d", space, name, p.EventName(event), p.Space, p.Name, p.EventName(p.Event), p.decoder.InputOffset())
 	}
 	return
 }
