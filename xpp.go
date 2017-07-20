@@ -26,7 +26,8 @@ const (
 
 type XMLPullParser struct {
 	// Document State
-	Spaces map[string]string
+	Spaces      map[string]string
+	SpacesStack []map[string]string
 
 	// Token State
 	Depth int
@@ -288,6 +289,12 @@ func (p *XMLPullParser) processStartToken(t xml.StartElement) {
 
 func (p *XMLPullParser) processEndToken(t xml.EndElement) {
 	p.Depth--
+	p.SpacesStack = p.SpacesStack[:len(p.SpacesStack)-1]
+	if len(p.SpacesStack) == 0 {
+		p.Spaces = map[string]string{}
+	} else {
+		p.Spaces = p.SpacesStack[len(p.SpacesStack)-1]
+	}
 	p.Name = t.Name.Local
 }
 
@@ -315,14 +322,20 @@ func (p *XMLPullParser) resetTokenState() {
 }
 
 func (p *XMLPullParser) trackNamespaces(t xml.StartElement) {
+	newSpace := map[string]string{}
+	for k, v := range p.Spaces {
+		newSpace[k] = v
+	}
 	for _, attr := range t.Attr {
 		if attr.Name.Space == "xmlns" {
 			space := strings.TrimSpace(attr.Value)
 			spacePrefix := strings.TrimSpace(strings.ToLower(attr.Name.Local))
-			p.Spaces[space] = spacePrefix
+			newSpace[space] = spacePrefix
 		} else if attr.Name.Local == "xmlns" {
 			space := strings.TrimSpace(attr.Value)
-			p.Spaces[space] = ""
+			newSpace[space] = ""
 		}
 	}
+	p.Spaces = newSpace
+	p.SpacesStack = append(p.SpacesStack, newSpace)
 }
