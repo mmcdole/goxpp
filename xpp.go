@@ -38,7 +38,7 @@ type XMLPullParser struct {
 	Text  string
 
 	decoder *xml.Decoder
-	token   interface{}
+	Token   interface{}
 }
 
 func NewXMLPullParser(r io.Reader, strict bool, cr CharsetReader) *XMLPullParser {
@@ -109,16 +109,16 @@ func (p *XMLPullParser) NextToken() (event XMLEventType, err error) {
 			// XML decoder returns the EOF as an error
 			// but we want to return it as a valid
 			// EndDocument token instead
-			p.token = nil
+			p.Token = nil
 			p.Event = EndDocument
 			return p.Event, nil
 		}
 		return event, err
 	}
 
-	p.token = xml.CopyToken(token)
-	p.processToken(p.token)
-	p.Event = p.EventType(p.token)
+	p.Token = xml.CopyToken(token)
+	p.processToken(p.Token)
+	p.Event = p.EventType(p.Token)
 
 	return p.Event, nil
 }
@@ -197,7 +197,7 @@ func (p *XMLPullParser) DecodeElement(v interface{}) error {
 
 	//tok := &p.token
 
-	startToken := p.token.(xml.StartElement)
+	startToken := p.Token.(xml.StartElement)
 
 	// Consumes all tokens until the matching end token.
 	err := p.decoder.DecodeElement(v, &startToken)
@@ -213,7 +213,7 @@ func (p *XMLPullParser) DecodeElement(v interface{}) error {
 	p.Event = EndTag
 	p.Depth--
 	p.Name = name
-	p.token = nil
+	p.Token = nil
 	return nil
 }
 
