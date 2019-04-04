@@ -170,6 +170,18 @@ func (p *XMLPullParser) Skip() error {
 	}
 }
 
+func (p *XMLPullParser) SkipOne() error {
+	tok, err := p.NextToken()
+	if err != nil {
+		return err
+	}
+	if tok == EndTag {
+		return nil
+	} else {
+		return p.SkipOne()
+	}
+}
+
 func (p *XMLPullParser) Attribute(name string) string {
 	for _, attr := range p.Attrs {
 		if attr.Name.Local == name {
