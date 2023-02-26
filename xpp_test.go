@@ -5,7 +5,7 @@ import (
 	"io"
 	"testing"
 
-	"github.com/mmcdole/goxpp"
+	xpp "github.com/mmcdole/goxpp"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -82,6 +82,37 @@ func TestDecodeElementDepth(t *testing.T) {
 	p.NextTag()
 	assert.Equal(t, "d2", p.Name)
 	assert.Equal(t, 2, p.Depth) // should still be 2, not 3
+	p.DecodeElement(&v{})
+}
+
+func TestXMLBase(t *testing.T) {
+	crReader := func(charset string, input io.Reader) (io.Reader, error) {
+		return input, nil
+	}
+	r := bytes.NewBufferString(`<root xml:base="https://example.org/"><d2 xml:base="relative">foo</d2><d2>bar</d2></root>`)
+	p := xpp.NewXMLPullParser(r, false, crReader)
+
+	type v struct{}
+
+	// move to root
+	p.NextTag()
+	assert.Equal(t, "root", p.Name)
+	assert.Equal(t, "https://example.org/", p.BaseStack.Top().String())
+
+	// decode first <d2>
+	p.NextTag()
+	assert.Equal(t, "d2", p.Name)
+	assert.Equal(t, "https://example.org/relative", p.BaseStack.Top().String())
+	
+	resolved, err := p.XmlBaseResolveUrl("test")
+	assert.NoError(t, err)
+	assert.Equal(t, "https://example.org/relative/test", resolved.String())
+	p.DecodeElement(&v{})
+
+	// decode second <d2>
+	p.NextTag()
+	assert.Equal(t, "d2", p.Name)
+	assert.Equal(t, "https://example.org/", p.BaseStack.Top().String())
 	p.DecodeElement(&v{})
 }
 
