@@ -89,7 +89,7 @@ func TestXMLBase(t *testing.T) {
 	crReader := func(charset string, input io.Reader) (io.Reader, error) {
 		return input, nil
 	}
-	r := bytes.NewBufferString(`<root xml:base="https://example.org/"><d2 xml:base="relative">foo</d2><d2>bar</d2></root>`)
+	r := bytes.NewBufferString(`<root xml:base="https://example.org/"><d2 xml:base="relative">foo</d2><d2>bar</d2><d2>baz</d2></root>`)
 	p := xpp.NewXMLPullParser(r, false, crReader)
 
 	type v struct{}
@@ -103,7 +103,7 @@ func TestXMLBase(t *testing.T) {
 	p.NextTag()
 	assert.Equal(t, "d2", p.Name)
 	assert.Equal(t, "https://example.org/relative", p.BaseStack.Top().String())
-	
+
 	resolved, err := p.XmlBaseResolveUrl("test")
 	assert.NoError(t, err)
 	assert.Equal(t, "https://example.org/relative/test", resolved.String())
@@ -114,6 +114,11 @@ func TestXMLBase(t *testing.T) {
 	assert.Equal(t, "d2", p.Name)
 	assert.Equal(t, "https://example.org/", p.BaseStack.Top().String())
 	p.DecodeElement(&v{})
+
+	// ensure xml:base is still set to root element's base
+	p.NextTag()
+	assert.Equal(t, "d2", p.Name)
+	assert.Equal(t, "https://example.org/", p.BaseStack.Top().String())
 }
 
 func toNextStart(t *testing.T, p *xpp.XMLPullParser) {
