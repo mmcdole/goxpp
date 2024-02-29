@@ -89,7 +89,7 @@ func TestXMLBase(t *testing.T) {
 	crReader := func(charset string, input io.Reader) (io.Reader, error) {
 		return input, nil
 	}
-	r := bytes.NewBufferString(`<root xml:base="https://example.org/"><d2 xml:base="relative">foo</d2><d2>bar</d2><d2>baz</d2></root>`)
+	r := bytes.NewBufferString(`<root xml:base="https://example.org/path/"><d2 xml:base="relative">foo</d2><d2 xml:base="/absolute">bar</d2><d2>baz</d2></root>`)
 	p := xpp.NewXMLPullParser(r, false, crReader)
 
 	type v struct{}
@@ -97,28 +97,28 @@ func TestXMLBase(t *testing.T) {
 	// move to root
 	p.NextTag()
 	assert.Equal(t, "root", p.Name)
-	assert.Equal(t, "https://example.org/", p.BaseStack.Top().String())
+	assert.Equal(t, "https://example.org/path/", p.BaseStack.Top().String())
 
 	// decode first <d2>
 	p.NextTag()
 	assert.Equal(t, "d2", p.Name)
-	assert.Equal(t, "https://example.org/relative", p.BaseStack.Top().String())
+	assert.Equal(t, "https://example.org/path/relative", p.BaseStack.Top().String())
 
 	resolved, err := p.XmlBaseResolveUrl("test")
 	assert.NoError(t, err)
-	assert.Equal(t, "https://example.org/relative/test", resolved.String())
+	assert.Equal(t, "https://example.org/path/relative/test", resolved.String())
 	p.DecodeElement(&v{})
 
 	// decode second <d2>
 	p.NextTag()
 	assert.Equal(t, "d2", p.Name)
-	assert.Equal(t, "https://example.org/", p.BaseStack.Top().String())
+	assert.Equal(t, "https://example.org/absolute", p.BaseStack.Top().String())
 	p.DecodeElement(&v{})
 
 	// ensure xml:base is still set to root element's base
 	p.NextTag()
 	assert.Equal(t, "d2", p.Name)
-	assert.Equal(t, "https://example.org/", p.BaseStack.Top().String())
+	assert.Equal(t, "https://example.org/path/", p.BaseStack.Top().String())
 }
 
 func toNextStart(t *testing.T, p *xpp.XMLPullParser) {
