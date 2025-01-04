@@ -24,65 +24,38 @@ go get github.com/mmcdole/goxpp
 ```go
 import "github.com/mmcdole/goxpp"
 
-// Create a new parser
+// Parse RSS feed
 file, _ := os.Open("feed.rss")
 p := xpp.NewXMLPullParser(file, false, nil)
 
-// Find RSS root and channel
-for {
-    tok, err := p.NextTag()
+// Find channel element
+for tok, err := p.NextTag(); tok != xpp.EndDocument; tok, err = p.NextTag() {
     if err != nil {
         return err
     }
     if tok == xpp.StartTag && p.Name == "channel" {
-        break
-    }
-}
-
-// Process channel elements
-for {
-    tok, err := p.NextTag()
-    if err != nil {
-        return err
-    }
-    if tok == xpp.EndTag {
-        break
-    }
-
-    if tok == xpp.StartTag {
-        switch p.Name {
-        case "title":
-            title, _ := p.NextText()
-            fmt.Printf("Feed: %s\n", title)
-        case "item":
-            // Process item fields
-            for {
-                tok, err := p.NextTag()
-                if err != nil {
-                    return err
-                }
-                if tok == xpp.EndTag {
-                    break
-                }
-                if tok == xpp.StartTag {
-                    switch p.Name {
-                    case "title":
-                        title, _ := p.NextText()
-                        fmt.Printf("  Title: %s\n", title)
-                    case "link":
-                        link, _ := p.NextText()
-                        fmt.Printf("  URL: %s\n", link)
-                    case "description":
-                        desc, _ := p.NextText()
-                        fmt.Printf("  Description: %s\n", desc)
-                    default:
-                        p.Skip()
-                    }
+        // Process channel contents
+        for tok, err = p.NextTag(); tok != xpp.EndTag; tok, err = p.NextTag() {
+            if err != nil {
+                return err
+            }
+            if tok == xpp.StartTag {
+                switch p.Name {
+                case "title":
+                    title, _ := p.NextText()
+                    fmt.Printf("Feed: %s\n", title)
+                case "item":
+                    // Get item title and skip rest
+                    p.NextTag()
+                    title, _ := p.NextText()
+                    fmt.Printf("Item: %s\n", title)
+                    p.Skip()
+                default:
+                    p.Skip()
                 }
             }
-        default:
-            p.Skip()
         }
+        break
     }
 }
 ```
