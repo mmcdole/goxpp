@@ -25,23 +25,64 @@ go get github.com/mmcdole/goxpp
 import "github.com/mmcdole/goxpp"
 
 // Create a new parser
-file, _ := os.Open("file.xml")
-parser := xpp.NewXMLPullParser(file, false, nil)
+file, _ := os.Open("feed.rss")
+p := xpp.NewXMLPullParser(file, false, nil)
 
-// Navigate through the document
+// Find RSS root and channel
 for {
-    token, _ := parser.Next()
-    if token == xpp.EndDocument {
+    tok, err := p.NextTag()
+    if err != nil {
+        return err
+    }
+    if tok == xpp.StartTag && p.Name == "channel" {
         break
     }
-    
-    switch token {
-    case xpp.StartTag:
-        // Handle start tag
-        fmt.Printf("Tag: %s\n", parser.Name)
-    case xpp.Text:
-        // Handle text content
-        fmt.Printf("Text: %s\n", parser.Text)
+}
+
+// Process channel elements
+for {
+    tok, err := p.NextTag()
+    if err != nil {
+        return err
+    }
+    if tok == xpp.EndTag {
+        break
+    }
+
+    if tok == xpp.StartTag {
+        switch p.Name {
+        case "title":
+            title, _ := p.NextText()
+            fmt.Printf("Feed: %s\n", title)
+        case "item":
+            // Process item fields
+            for {
+                tok, err := p.NextTag()
+                if err != nil {
+                    return err
+                }
+                if tok == xpp.EndTag {
+                    break
+                }
+                if tok == xpp.StartTag {
+                    switch p.Name {
+                    case "title":
+                        title, _ := p.NextText()
+                        fmt.Printf("  Title: %s\n", title)
+                    case "link":
+                        link, _ := p.NextText()
+                        fmt.Printf("  URL: %s\n", link)
+                    case "description":
+                        desc, _ := p.NextText()
+                        fmt.Printf("  Description: %s\n", desc)
+                    default:
+                        p.Skip()
+                    }
+                }
+            }
+        default:
+            p.Skip()
+        }
     }
 }
 ```
