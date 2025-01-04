@@ -1,6 +1,6 @@
 module github.com/mmcdole/goxpp
 
-go 1.21
+go 1.19
 
 require github.com/stretchr/testify v1.10.0
 

@@ -1,45 +1,63 @@
 # goxpp
 
 [![Build Status](https://github.com/mmcdole/goxpp/actions/workflows/ci.yml/badge.svg)](https://github.com/mmcdole/goxpp/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/mmcdole/goxpp/branch/main/graph/badge.svg)](https://codecov.io/gh/mmcdole/goxpp)
+[![codecov](https://codecov.io/gh/mmcdole/goxpp/branch/master/graph/badge.svg)](https://codecov.io/gh/mmcdole/goxpp)
 [![License](http://img.shields.io/:license-mit-blue.svg)](http://doge.mit-license.org)
 [![Go Reference](https://pkg.go.dev/badge/github.com/mmcdole/goxpp.svg)](https://pkg.go.dev/github.com/mmcdole/goxpp)
 
-The `goxpp` library, inspired by [Java's XMLPullParser](http://www.xmlpull.org/v1/download/unpacked/doc/quick_intro.html), is a lightweight wrapper for Go's standard XML Decoder, tailored for developers who need fine-grained control over XML parsing. Unlike simple unmarshaling of entire documents, this library excels in scenarios requiring manual navigation and consumption of XML elements. It provides a pull parser approach with convenience methods for effortlessly consuming whole tags, skipping elements, and more, granting a level of flexibility and control beyond what Go's standard XML decode method offers.
+A lightweight XML Pull Parser for Go, inspired by [Java's XMLPullParser](http://www.xmlpull.org/v1/download/unpacked/doc/quick_intro.html). It provides fine-grained control over XML parsing with a simple, intuitive API.
 
-## Overview
+## Features
 
-To begin parsing a XML document using `goxpp` you must pass it an `io.Reader` object for your document:
+- Pull-based parsing for fine-grained document control
+- Efficient navigation and element skipping
+- Simple, idiomatic Go API
 
-```go
-file, err := os.Open("path/file.xml")
-parser := xpp.NewXMLPullParser(file, false, charset.NewReader)
+## Installation
+
+```bash
+go get github.com/mmcdole/goxpp
 ```
 
-The `goxpp` library decodes documents into a series of token objects:
+## Quick Start
 
-| Token Name                       |
-|----------------------------------|
-| 	StartDocument                  |
-| 	EndDocument                    |
-| 	StartTag                       |
-| 	EndTag                         |
-| 	Text                           |
-| 	Comment                        |
-| 	ProcessingInstruction          |
-| 	Directive                      |
-| 	IgnorableWhitespace            |
+```go
+import "github.com/mmcdole/goxpp"
 
-You will always start at the `StartDocument` token and can use the following functions to walk through a document:
+// Create a new parser
+file, _ := os.Open("file.xml")
+parser := xpp.NewXMLPullParser(file, false, nil)
 
-| Function Name                    | Description                           |
-|----------------------------------|---------------------------------------|
-| 	 Next()                        | Advance to the next `Text`, `StartTag`, `EndTag`, `EndDocument` token.<br>Note: skips `Comment`, `Directive` and `ProcessingInstruction` |
-| 	NextToken()                    | Advance to the next token regardless of type.                                                                |
-| 	NextText()                     | Advance to the next `Text` token.                                                                |
-| 	Skip()                         | Skip the next token.   |
-| 	DecodeElement(v interface{})   | Decode an entire element from the current tag into a struct.<br>Note: must be at a `StartTag` token |
+// Navigate through the document
+for {
+    token, _ := parser.Next()
+    if token == xpp.EndDocument {
+        break
+    }
+    
+    switch token {
+    case xpp.StartTag:
+        // Handle start tag
+        fmt.Printf("Tag: %s\n", parser.Name)
+    case xpp.Text:
+        // Handle text content
+        fmt.Printf("Text: %s\n", parser.Text)
+    }
+}
+```
 
+## Token Types
 
+- `StartDocument`, `EndDocument`
+- `StartTag`, `EndTag`
+- `Text`, `Comment`
+- `ProcessingInstruction`, `Directive`
+- `IgnorableWhitespace`
 
-This project is licensed under the [MIT License](https://raw.githubusercontent.com/mmcdole/goxpp/master/LICENSE)
+## Documentation
+
+For detailed documentation and examples, visit [pkg.go.dev](https://pkg.go.dev/github.com/mmcdole/goxpp).
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
