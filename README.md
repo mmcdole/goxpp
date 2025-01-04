@@ -1,7 +1,9 @@
 # goxpp
 
-[![Build Status](https://travis-ci.org/mmcdole/goxpp.svg?branch=master)](https://travis-ci.org/mmcdole/goxpp) [![Coverage Status](https://coveralls.io/repos/github/mmcdole/goxpp/badge.svg?branch=master)](https://coveralls.io/github/mmcdole/goxpp?branch=master) [![License](http://img.shields.io/:license-mit-blue.svg)](http://doge.mit-license.org)
-[![GoDoc](https://godoc.org/github.com/mmcdole/goxpp?status.svg)](https://godoc.org/github.com/mmcdole/goxpp)
+[![Build Status](https://github.com/mmcdole/goxpp/actions/workflows/ci.yml/badge.svg)](https://github.com/mmcdole/goxpp/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/mmcdole/goxpp/branch/main/graph/badge.svg)](https://codecov.io/gh/mmcdole/goxpp)
+[![License](http://img.shields.io/:license-mit-blue.svg)](http://doge.mit-license.org)
+[![Go Reference](https://pkg.go.dev/badge/github.com/mmcdole/goxpp.svg)](https://pkg.go.dev/github.com/mmcdole/goxpp)
 
 The `goxpp` library, inspired by [Java's XMLPullParser](http://www.xmlpull.org/v1/download/unpacked/doc/quick_intro.html), is a lightweight wrapper for Go's standard XML Decoder, tailored for developers who need fine-grained control over XML parsing. Unlike simple unmarshaling of entire documents, this library excels in scenarios requiring manual navigation and consumption of XML elements. It provides a pull parser approach with convenience methods for effortlessly consuming whole tags, skipping elements, and more, granting a level of flexibility and control beyond what Go's standard XML decode method offers.
 
@@ -41,4 +43,3 @@ You will always start at the `StartDocument` token and can use the following fun
 
 
 This project is licensed under the [MIT License](https://raw.githubusercontent.com/mmcdole/goxpp/master/LICENSE)
-
