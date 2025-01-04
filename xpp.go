@@ -121,8 +121,8 @@ func (p *XMLPullParser) Next() (event XMLEventType, err error) {
 			event == ProcessingInstruction {
 			continue
 		}
+		return event, nil
 	}
-	return event, nil
 }
 
 func (p *XMLPullParser) NextToken() (event XMLEventType, err error) {
