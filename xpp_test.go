@@ -132,7 +132,6 @@ func toNextStart(t *testing.T, p *xpp.XMLPullParser) {
 			break
 		}
 	}
-	return
 }
 
 func TestNextText(t *testing.T) {

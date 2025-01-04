@@ -93,7 +93,7 @@ func (p *XMLPullParser) NextTag() (event XMLEventType, err error) {
 	}
 
 	if t != StartTag && t != EndTag {
-		return event, fmt.Errorf("Expected StartTag or EndTag but got %s at offset: %d", p.EventName(t), p.decoder.InputOffset())
+		return event, fmt.Errorf("expected starttag or endtag but got %s at offset: %d", p.EventName(t), p.decoder.InputOffset())
 	}
 
 	return t, nil
@@ -151,7 +151,7 @@ func (p *XMLPullParser) NextToken() (event XMLEventType, err error) {
 
 func (p *XMLPullParser) NextText() (string, error) {
 	if p.Event != StartTag {
-		return "", errors.New("Parser must be on StartTag to get NextText()")
+		return "", errors.New("parser must be on starttag to get nexttext()")
 	}
 
 	t, err := p.Next()
@@ -160,7 +160,7 @@ func (p *XMLPullParser) NextText() (string, error) {
 	}
 
 	if t != EndTag && t != Text {
-		return "", errors.New("Parser must be on EndTag or Text to read text")
+		return "", errors.New("parser must be on endtag or text to read text")
 	}
 
 	var result string
@@ -172,7 +172,7 @@ func (p *XMLPullParser) NextText() (string, error) {
 		}
 
 		if t != EndTag && t != Text {
-			errstr := fmt.Sprintf("Event Text must be immediately followed by EndTag or Text but got %s", p.EventName(t))
+			errstr := fmt.Sprintf("event text must be immediately followed by endtag or text but got %s", p.EventName(t))
 			return "", errors.New(errstr)
 		}
 	}
@@ -210,15 +210,15 @@ func (p *XMLPullParser) Expect(event XMLEventType, name string) (err error) {
 }
 
 func (p *XMLPullParser) ExpectAll(event XMLEventType, space string, name string) (err error) {
-	if !(p.Event == event && (strings.ToLower(p.Space) == strings.ToLower(space) || space == "*") && (strings.ToLower(p.Name) == strings.ToLower(name) || name == "*")) {
-		err = fmt.Errorf("Expected Space:%s Name:%s Event:%s but got Space:%s Name:%s Event:%s at offset: %d", space, name, p.EventName(event), p.Space, p.Name, p.EventName(p.Event), p.decoder.InputOffset())
+	if !(p.Event == event && (strings.EqualFold(p.Space, space) || space == "*") && (strings.EqualFold(p.Name, name) || name == "*")) {
+		err = fmt.Errorf("expected space:%s name:%s event:%s but got space:%s name:%s event:%s at offset: %d", space, name, p.EventName(event), p.Space, p.Name, p.EventName(p.Event), p.decoder.InputOffset())
 	}
 	return
 }
 
 func (p *XMLPullParser) DecodeElement(v interface{}) error {
 	if p.Event != StartTag {
-		return errors.New("DecodeElement can only be called from a StartTag event")
+		return errors.New("decodeelement can only be called from a starttag event")
 	}
 
 	//tok := &p.token
