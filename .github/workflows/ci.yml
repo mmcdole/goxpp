@@ -31,10 +31,13 @@ jobs:
       run: go vet ./...
 
     - name: Install staticcheck
-      run: go install honnef.co/go/tools/cmd/staticcheck@2023.1.6
+      run: go install honnef.co/go/tools/cmd/staticcheck@latest
 
     - name: Static Check
       run: staticcheck ./...
+
+    - name: Run coverage
+      run: go test -race -coverprofile=coverage.txt -covermode=atomic ./...
 
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@v5
