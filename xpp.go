@@ -272,16 +272,12 @@ func (p *XMLPullParser) DecodeElement(v interface{}) error {
 	p.Name = name
 	p.token = nil
 
-	// if the token we decoded had an xml:base attribute, we need to pop it
-	// from the stack
-	// Note: this means it is up to the caller of DecodeElement to save the curent xml:base
-	// before calling DecodeElement if it needs to resolve relative URLs in `v`
-	for _, attr := range startToken.Attr {
-		if attr.Name.Space == xmlNSURI && attr.Name.Local == "base" {
-			p.popBase()
-			break
-		}
-	}
+	// decoder.DecodeElement consumed this element's end token internally, so
+	// processEndToken never ran for it. Pop the base its start token pushed
+	// (pushBase pushes one per element), mirroring processEndToken. Callers that
+	// need the element's xml:base to resolve relative URLs in `v` must capture
+	// it before calling DecodeElement.
+	p.popBase()
 	return nil
 }
 
@@ -446,27 +442,35 @@ func (p *XMLPullParser) popBase() string {
 
 // Searches current attributes for xml:base and updates the urlStack
 func (p *XMLPullParser) pushBase() error {
+	// Push a base entry for every element so the stack stays balanced with the
+	// per-element pop in processEndToken and DecodeElement. An element with its
+	// own xml:base resolves it against the parent's base; otherwise it inherits
+	// the parent's base unchanged. Pushing conditionally (only for xml:base
+	// elements) while popping unconditionally would pop an ancestor's base when
+	// a plain element closes.
+	parent := p.BaseStack.Top()
+
 	var base string
-	// search list of attrs for "xml:base"
 	for _, attr := range p.Attrs {
 		if attr.Name.Local == "base" && attr.Name.Space == xmlNSURI {
 			base = attr.Value
 			break
 		}
 	}
+
 	if base == "" {
-		// no base attribute found
+		p.BaseStack.push(parent)
 		return nil
 	}
 
 	newURL, err := url.Parse(base)
 	if err != nil {
+		// Still push so the stack stays balanced with the matching pop.
+		p.BaseStack.push(parent)
 		return err
 	}
-
-	topURL := p.BaseStack.Top()
-	if topURL != nil {
-		newURL = topURL.ResolveReference(newURL)
+	if parent != nil {
+		newURL = parent.ResolveReference(newURL)
 	}
 	p.BaseStack.push(newURL)
 	return nil
