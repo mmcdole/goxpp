@@ -163,9 +163,12 @@ func (p *XMLPullParser) NextText() (string, error) {
 		return "", errors.New("parser must be on endtag or text to read text")
 	}
 
-	var result string
+	// The decoder emits a separate CharData token at every entity and CDATA
+	// boundary, so entity-heavy text arrives as many small fragments. Use a
+	// Builder to avoid O(n^2) string concatenation.
+	var sb strings.Builder
 	for t == Text {
-		result = result + p.Text
+		sb.WriteString(p.Text)
 		t, err = p.Next()
 		if err != nil {
 			return "", err
@@ -177,21 +180,30 @@ func (p *XMLPullParser) NextText() (string, error) {
 		}
 	}
 
-	return result, nil
+	return sb.String(), nil
 }
 
+// Skip consumes tokens until the end tag matching the element the parser is
+// currently positioned on. It is iterative (a depth counter rather than
+// recursion) so deeply nested input can't overflow the goroutine stack, and it
+// bails on EndDocument instead of looping forever on a truncated stream.
 func (p *XMLPullParser) Skip() error {
+	depth := 0
 	for {
 		tok, err := p.NextToken()
 		if err != nil {
 			return err
 		}
-		if tok == StartTag {
-			if err := p.Skip(); err != nil {
-				return err
+		switch tok {
+		case StartTag:
+			depth++
+		case EndTag:
+			if depth == 0 {
+				return nil
 			}
-		} else if tok == EndTag {
-			return nil
+			depth--
+		case EndDocument:
+			return errors.New("unexpected end of document while skipping element")
 		}
 	}
 }
@@ -238,6 +250,20 @@ func (p *XMLPullParser) DecodeElement(v interface{}) error {
 	p.resetTokenState()
 	p.Event = EndTag
 	p.Depth--
+
+	// decoder.DecodeElement consumed this element's end token internally, so
+	// processEndToken never ran for it. Pop the namespace scope its start token
+	// pushed, mirroring processEndToken, otherwise p.Spaces/SpacesStack desync
+	// and the stack grows one entry per DecodeElement call.
+	if len(p.SpacesStack) > 0 {
+		p.SpacesStack = p.SpacesStack[:len(p.SpacesStack)-1]
+	}
+	if len(p.SpacesStack) == 0 {
+		p.Spaces = map[string]string{}
+	} else {
+		p.Spaces = p.SpacesStack[len(p.SpacesStack)-1]
+	}
+
 	p.Name = name
 	p.token = nil
 
