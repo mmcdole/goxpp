@@ -222,13 +222,26 @@ func (p *XMLPullParser) Skip() error {
 	}
 }
 
+// Attribute returns the value of the named attribute, preferring an
+// un-namespaced attribute over foreign-namespaced ones sharing the local
+// name (a document-order first match let e.g. an earlier xlink:href shadow
+// the plain href). A namespaced attribute is still returned when no plain
+// one exists.
 func (p *XMLPullParser) Attribute(name string) string {
+	var fallback string
+	found := false
 	for _, attr := range p.Attrs {
 		if attr.Name.Local == name {
-			return attr.Value
+			if attr.Name.Space == "" {
+				return attr.Value
+			}
+			if !found {
+				fallback = attr.Value
+				found = true
+			}
 		}
 	}
-	return ""
+	return fallback
 }
 
 func (p *XMLPullParser) Expect(event XMLEventType, name string) (err error) {

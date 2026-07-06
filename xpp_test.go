@@ -549,3 +549,30 @@ func TestDecodeElementEndTagSpace(t *testing.T) {
 		t.Fatalf("ExpectAll on synthetic end tag: %v", err)
 	}
 }
+
+// A foreign-namespaced attribute must not shadow the plain attribute with
+// the same local name (issue #31).
+func TestAttributePrefersUnNamespaced(t *testing.T) {
+	doc := `<root xmlns:o="http://other" o:href="WRONG" href="right"/>`
+	p := xpp.NewXMLPullParser(bytes.NewReader([]byte(doc)), false, nil)
+
+	if _, err := p.NextTag(); err != nil {
+		t.Fatalf("next: %v", err)
+	}
+	if got := p.Attribute("href"); got != "right" {
+		t.Fatalf("Attribute(href) = %q, want %q", got, "right")
+	}
+}
+
+// When only a namespaced attribute exists it is still returned by local name.
+func TestAttributeNamespacedFallback(t *testing.T) {
+	doc := `<root xmlns:o="http://other" o:href="only"/>`
+	p := xpp.NewXMLPullParser(bytes.NewReader([]byte(doc)), false, nil)
+
+	if _, err := p.NextTag(); err != nil {
+		t.Fatalf("next: %v", err)
+	}
+	if got := p.Attribute("href"); got != "only" {
+		t.Fatalf("Attribute(href) = %q, want %q", got, "only")
+	}
+}
