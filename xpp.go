@@ -71,6 +71,11 @@ func NewXMLPullParser(r io.Reader, strict bool, cr CharsetReader) *XMLPullParser
 	d := xml.NewDecoder(r)
 	d.Strict = strict
 	d.CharsetReader = cr
+	return NewXMLPullParserWithDecoder(d)
+}
+
+// NewXMLPullParserWithDecoder creates a new XMLPullParser with a custom decoder
+func NewXMLPullParserWithDecoder(d *xml.Decoder) *XMLPullParser {
 	return &XMLPullParser{
 		decoder: d,
 		Event:   StartDocument,
