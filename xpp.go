@@ -250,6 +250,20 @@ func (p *XMLPullParser) DecodeElement(v interface{}) error {
 	p.resetTokenState()
 	p.Event = EndTag
 	p.Depth--
+
+	// decoder.DecodeElement consumed this element's end token internally, so
+	// processEndToken never ran for it. Pop the namespace scope its start token
+	// pushed, mirroring processEndToken, otherwise p.Spaces/SpacesStack desync
+	// and the stack grows one entry per DecodeElement call.
+	if len(p.SpacesStack) > 0 {
+		p.SpacesStack = p.SpacesStack[:len(p.SpacesStack)-1]
+	}
+	if len(p.SpacesStack) == 0 {
+		p.Spaces = map[string]string{}
+	} else {
+		p.Spaces = p.SpacesStack[len(p.SpacesStack)-1]
+	}
+
 	p.Name = name
 	p.token = nil
 
