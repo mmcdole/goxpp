@@ -163,9 +163,12 @@ func (p *XMLPullParser) NextText() (string, error) {
 		return "", errors.New("parser must be on endtag or text to read text")
 	}
 
-	var result string
+	// The decoder emits a separate CharData token at every entity and CDATA
+	// boundary, so entity-heavy text arrives as many small fragments. Use a
+	// Builder to avoid O(n^2) string concatenation.
+	var sb strings.Builder
 	for t == Text {
-		result = result + p.Text
+		sb.WriteString(p.Text)
 		t, err = p.Next()
 		if err != nil {
 			return "", err
@@ -177,7 +180,7 @@ func (p *XMLPullParser) NextText() (string, error) {
 		}
 	}
 
-	return result, nil
+	return sb.String(), nil
 }
 
 func (p *XMLPullParser) Skip() error {
