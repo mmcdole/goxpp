@@ -3,11 +3,41 @@ package xpp_test
 import (
 	"bytes"
 	"io"
+	"reflect"
 	"testing"
 
 	xpp "github.com/mmcdole/goxpp"
-	"github.com/stretchr/testify/assert"
 )
+
+// Small assertion helpers so this package has no test dependencies.
+
+func eq(t *testing.T, got, want interface{}) {
+	t.Helper()
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("not equal:\n  got:  %#v\n  want: %#v", got, want)
+	}
+}
+
+func noErr(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func hasErr(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		t.Error("expected an error, got nil")
+	}
+}
+
+func lenIs(t *testing.T, got, want int) {
+	t.Helper()
+	if got != want {
+		t.Errorf("length = %d, want %d", got, want)
+	}
+}
 
 func TestEventName(t *testing.T) {
 	var eventNameTests = []struct {
@@ -28,7 +58,7 @@ func TestEventName(t *testing.T) {
 	p := xpp.XMLPullParser{}
 	for _, test := range eventNameTests {
 		actual := p.EventName(test.event)
-		assert.Equal(t, actual, test.expected, "Expect event name %s did not match actual event name %s.\n", test.expected, actual)
+		eq(t, actual, test.expected)
 	}
 }
 
@@ -39,9 +69,9 @@ func TestSpaceStackSelfClosingTag(t *testing.T) {
 	r := bytes.NewBufferString(`<a:y xmlns:a="z"/><x>foo</x>`)
 	p := xpp.NewXMLPullParser(r, false, crReader)
 	toNextStart(t, p)
-	assert.EqualValues(t, map[string]string{"z": "a"}, p.Spaces)
+	eq(t, p.Spaces, map[string]string{"z": "a"})
 	toNextStart(t, p)
-	assert.EqualValues(t, map[string]string{}, p.Spaces)
+	eq(t, p.Spaces, map[string]string{})
 }
 
 func TestSpaceStackNestedTag(t *testing.T) {
@@ -51,11 +81,11 @@ func TestSpaceStackNestedTag(t *testing.T) {
 	r := bytes.NewBufferString(`<y xmlns:a="z"><a:x>foo</a:x></y><w></w>`)
 	p := xpp.NewXMLPullParser(r, false, crReader)
 	toNextStart(t, p)
-	assert.EqualValues(t, map[string]string{"z": "a"}, p.Spaces)
+	eq(t, p.Spaces, map[string]string{"z": "a"})
 	toNextStart(t, p)
-	assert.EqualValues(t, map[string]string{"z": "a"}, p.Spaces)
+	eq(t, p.Spaces, map[string]string{"z": "a"})
 	toNextStart(t, p)
-	assert.EqualValues(t, map[string]string{}, p.Spaces)
+	eq(t, p.Spaces, map[string]string{})
 }
 
 func TestDecodeElementDepth(t *testing.T) {
@@ -69,19 +99,19 @@ func TestDecodeElementDepth(t *testing.T) {
 
 	// move to root
 	p.NextTag()
-	assert.Equal(t, "root", p.Name)
-	assert.Equal(t, 1, p.Depth)
+	eq(t, p.Name, "root")
+	eq(t, p.Depth, 1)
 
 	// decode first <d2>
 	p.NextTag()
-	assert.Equal(t, "d2", p.Name)
-	assert.Equal(t, 2, p.Depth)
+	eq(t, p.Name, "d2")
+	eq(t, p.Depth, 2)
 	p.DecodeElement(&v{})
 
 	// decode second <d2>
 	p.NextTag()
-	assert.Equal(t, "d2", p.Name)
-	assert.Equal(t, 2, p.Depth) // should still be 2, not 3
+	eq(t, p.Name, "d2")
+	eq(t, p.Depth, 2) // should still be 2, not 3
 	p.DecodeElement(&v{})
 }
 
@@ -97,20 +127,20 @@ func TestDecodeElementNamespaceStack(t *testing.T) {
 	type v struct{}
 
 	p.NextTag() // root
-	assert.EqualValues(t, map[string]string{"z": "a"}, p.Spaces)
-	assert.Len(t, p.SpacesStack, 1)
+	eq(t, p.Spaces, map[string]string{"z": "a"})
+	lenIs(t, len(p.SpacesStack), 1)
 
 	p.NextTag() // first <d2>, adds b:w
-	assert.EqualValues(t, map[string]string{"z": "a", "w": "b"}, p.Spaces)
-	assert.Len(t, p.SpacesStack, 2)
+	eq(t, p.Spaces, map[string]string{"z": "a", "w": "b"})
+	lenIs(t, len(p.SpacesStack), 2)
 
 	p.DecodeElement(&v{})
 	// Scope must be back to root's: b:w no longer leaks and the stack shrank.
-	assert.EqualValues(t, map[string]string{"z": "a"}, p.Spaces)
-	assert.Len(t, p.SpacesStack, 1)
+	eq(t, p.Spaces, map[string]string{"z": "a"})
+	lenIs(t, len(p.SpacesStack), 1)
 
 	p.NextTag() // second <d2>
-	assert.EqualValues(t, map[string]string{"z": "a"}, p.Spaces)
+	eq(t, p.Spaces, map[string]string{"z": "a"})
 }
 
 func TestXMLBase(t *testing.T) {
@@ -124,29 +154,29 @@ func TestXMLBase(t *testing.T) {
 
 	// move to root
 	p.NextTag()
-	assert.Equal(t, "root", p.Name)
-	assert.Equal(t, "https://example.org/path/", p.BaseStack.Top().String())
+	eq(t, p.Name, "root")
+	eq(t, p.BaseStack.Top().String(), "https://example.org/path/")
 
 	// decode first <d2>
 	p.NextTag()
-	assert.Equal(t, "d2", p.Name)
-	assert.Equal(t, "https://example.org/path/relative", p.BaseStack.Top().String())
+	eq(t, p.Name, "d2")
+	eq(t, p.BaseStack.Top().String(), "https://example.org/path/relative")
 
 	resolved, err := p.XmlBaseResolveUrl("test")
-	assert.NoError(t, err)
-	assert.Equal(t, "https://example.org/path/relative/test", resolved.String())
+	noErr(t, err)
+	eq(t, resolved.String(), "https://example.org/path/relative/test")
 	p.DecodeElement(&v{})
 
 	// decode second <d2>
 	p.NextTag()
-	assert.Equal(t, "d2", p.Name)
-	assert.Equal(t, "https://example.org/absolute", p.BaseStack.Top().String())
+	eq(t, p.Name, "d2")
+	eq(t, p.BaseStack.Top().String(), "https://example.org/absolute")
 	p.DecodeElement(&v{})
 
 	// ensure xml:base is still set to root element's base
 	p.NextTag()
-	assert.Equal(t, "d2", p.Name)
-	assert.Equal(t, "https://example.org/path/", p.BaseStack.Top().String())
+	eq(t, p.Name, "d2")
+	eq(t, p.BaseStack.Top().String(), "https://example.org/path/")
 }
 
 func TestXmlBaseResolveUrlDoesNotMutateBase(t *testing.T) {
@@ -160,11 +190,11 @@ func TestXmlBaseResolveUrlDoesNotMutateBase(t *testing.T) {
 	before := p.BaseStack.Top().String()
 
 	resolved, err := p.XmlBaseResolveUrl("x")
-	assert.NoError(t, err)
-	assert.Equal(t, "https://example.org/a/b/x", resolved.String())
+	noErr(t, err)
+	eq(t, resolved.String(), "https://example.org/a/b/x")
 
 	// The stacked base must be unchanged by the resolution.
-	assert.Equal(t, before, p.BaseStack.Top().String())
+	eq(t, p.BaseStack.Top().String(), before)
 }
 
 func toNextStart(t *testing.T, p *xpp.XMLPullParser) {
@@ -216,19 +246,19 @@ func TestNextText(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			p := xpp.NewXMLPullParser(bytes.NewBufferString(tt.input), true, nil)
-			
+
 			// Move to first start tag
 			_, err := p.NextTag()
-			assert.NoError(t, err)
-			
+			noErr(t, err)
+
 			result, err := p.NextText()
 			if tt.wantErr {
-				assert.Error(t, err)
+				hasErr(t, err)
 				return
 			}
-			
-			assert.NoError(t, err)
-			assert.Equal(t, tt.expected, result)
+
+			noErr(t, err)
+			eq(t, result, tt.expected)
 		})
 	}
 }
@@ -273,27 +303,27 @@ func TestSkip(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			p := xpp.NewXMLPullParser(bytes.NewBufferString(tt.input), true, nil)
-			
+
 			// Move to root
 			_, err := p.NextTag()
-			assert.NoError(t, err)
-			
+			noErr(t, err)
+
 			// Move to skip element
 			_, err = p.NextTag()
-			assert.NoError(t, err)
-			
+			noErr(t, err)
+
 			// Skip the element
 			err = p.Skip()
 			if tt.wantErr {
-				assert.Error(t, err)
+				hasErr(t, err)
 				return
 			}
-			assert.NoError(t, err)
-			
+			noErr(t, err)
+
 			// Verify we're at the keep element
 			_, err = p.NextTag()
-			assert.NoError(t, err)
-			assert.Equal(t, "keep", p.Name)
+			noErr(t, err)
+			eq(t, p.Name, "keep")
 		})
 	}
 }
@@ -343,7 +373,7 @@ func TestSpecialCases(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Logf("Starting test case: %s with input: %s", tt.name, tt.input)
 			p := xpp.NewXMLPullParser(bytes.NewBufferString(tt.input), true, nil)
-			
+
 			var events []xpp.XMLEventType
 			for {
 				event, err := p.NextToken()
@@ -352,14 +382,14 @@ func TestSpecialCases(t *testing.T) {
 				}
 				events = append(events, event)
 				t.Logf("Event: %s (Name: %s, Text: %q)", p.EventName(event), p.Name, p.Text)
-				
+
 				// Stop when we reach EndDocument
 				if event == xpp.EndDocument {
 					break
 				}
 			}
-			
-			assert.Equal(t, tt.expectedTypes, events, "Event sequence mismatch")
+
+			eq(t, events, tt.expectedTypes)
 		})
 	}
 }
