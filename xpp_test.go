@@ -495,3 +495,57 @@ func TestDecodeElementSuccessDoesNotPoison(t *testing.T) {
 		t.Fatalf("got %s %q, want StartTag d3", p.EventName(tok), p.Name)
 	}
 }
+
+// EndTag events must carry the element's namespace so ExpectAll can validate
+// end tags (issue #29).
+func TestEndTagSpacePopulated(t *testing.T) {
+	doc := `<a:x xmlns:a="http://ns">v</a:x>`
+	p := xpp.NewXMLPullParser(bytes.NewReader([]byte(doc)), false, nil)
+
+	for {
+		tok, err := p.NextToken()
+		if err != nil {
+			t.Fatalf("next: %v", err)
+		}
+		if tok == xpp.EndTag {
+			break
+		}
+		if tok == xpp.EndDocument {
+			t.Fatal("no end tag seen")
+		}
+	}
+
+	if p.Space != "http://ns" {
+		t.Fatalf("Space on EndTag = %q, want %q", p.Space, "http://ns")
+	}
+	if err := p.ExpectAll(xpp.EndTag, "http://ns", "x"); err != nil {
+		t.Fatalf("ExpectAll on end tag: %v", err)
+	}
+}
+
+// The synthetic EndTag left behind by DecodeElement must carry the decoded
+// element's namespace too.
+func TestDecodeElementEndTagSpace(t *testing.T) {
+	doc := `<root xmlns:a="http://ns"><a:x><n>1</n></a:x></root>`
+	p := xpp.NewXMLPullParser(bytes.NewReader([]byte(doc)), false, nil)
+
+	for {
+		tok, err := p.NextToken()
+		if err != nil {
+			t.Fatalf("next: %v", err)
+		}
+		if tok == xpp.StartTag && p.Name == "x" {
+			break
+		}
+	}
+
+	var v struct {
+		N int `xml:"n"`
+	}
+	if err := p.DecodeElement(&v); err != nil {
+		t.Fatalf("DecodeElement: %v", err)
+	}
+	if err := p.ExpectAll(xpp.EndTag, "http://ns", "x"); err != nil {
+		t.Fatalf("ExpectAll on synthetic end tag: %v", err)
+	}
+}

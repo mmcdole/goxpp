@@ -264,6 +264,7 @@ func (p *XMLPullParser) DecodeElement(v interface{}) error {
 	}
 
 	name := p.Name
+	space := p.Space
 
 	// Need to set the "current" token name/event
 	// to the previous StartTag event's name
@@ -285,6 +286,7 @@ func (p *XMLPullParser) DecodeElement(v interface{}) error {
 	}
 
 	p.Name = name
+	p.Space = space
 	p.token = nil
 
 	// decoder.DecodeElement consumed this element's end token internally, so
@@ -405,6 +407,7 @@ func (p *XMLPullParser) processEndToken(t xml.EndElement) {
 		p.Spaces = p.SpacesStack[len(p.SpacesStack)-1]
 	}
 	p.Name = t.Name.Local
+	p.Space = t.Name.Space
 	p.popBase()
 }
 
