@@ -2,437 +2,167 @@ package xpp_test
 
 import (
 	"bytes"
+	"encoding/xml"
+	"errors"
 	"io"
-	"reflect"
+	"strings"
 	"testing"
 
-	xpp "github.com/mmcdole/goxpp"
+	xpp "github.com/mmcdole/goxpp/v2"
 )
 
-// Small assertion helpers so this package has no test dependencies.
+func newParser(doc string) *xpp.Parser {
+	d := xml.NewDecoder(bytes.NewReader([]byte(doc)))
+	d.Strict = false
+	return xpp.New(d)
+}
 
-func eq(t *testing.T, got, want interface{}) {
+// advanceTo positions the parser on the first StartTag with the given local
+// name.
+func advanceTo(t *testing.T, p *xpp.Parser, name string) {
 	t.Helper()
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("not equal:\n  got:  %#v\n  want: %#v", got, want)
-	}
-}
-
-func noErr(t *testing.T, err error) {
-	t.Helper()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func hasErr(t *testing.T, err error) {
-	t.Helper()
-	if err == nil {
-		t.Error("expected an error, got nil")
-	}
-}
-
-func lenIs(t *testing.T, got, want int) {
-	t.Helper()
-	if got != want {
-		t.Errorf("length = %d, want %d", got, want)
-	}
-}
-
-func TestEventName(t *testing.T) {
-	var eventNameTests = []struct {
-		event    xpp.XMLEventType
-		expected string
-	}{
-		{xpp.StartTag, "StartTag"},
-		{xpp.EndTag, "EndTag"},
-		{xpp.StartDocument, "StartDocument"},
-		{xpp.EndDocument, "EndDocument"},
-		{xpp.ProcessingInstruction, "ProcessingInstruction"},
-		{xpp.Directive, "Directive"},
-		{xpp.Comment, "Comment"},
-		{xpp.Text, "Text"},
-		{xpp.IgnorableWhitespace, "IgnorableWhitespace"},
-	}
-
-	p := xpp.XMLPullParser{}
-	for _, test := range eventNameTests {
-		actual := p.EventName(test.event)
-		eq(t, actual, test.expected)
-	}
-}
-
-func TestSpaceStackSelfClosingTag(t *testing.T) {
-	crReader := func(charset string, input io.Reader) (io.Reader, error) {
-		return input, nil
-	}
-	r := bytes.NewBufferString(`<a:y xmlns:a="z"/><x>foo</x>`)
-	p := xpp.NewXMLPullParser(r, false, crReader)
-	toNextStart(t, p)
-	eq(t, p.Spaces, map[string]string{"z": "a"})
-	toNextStart(t, p)
-	eq(t, p.Spaces, map[string]string{})
-}
-
-func TestSpaceStackNestedTag(t *testing.T) {
-	crReader := func(charset string, input io.Reader) (io.Reader, error) {
-		return input, nil
-	}
-	r := bytes.NewBufferString(`<y xmlns:a="z"><a:x>foo</a:x></y><w></w>`)
-	p := xpp.NewXMLPullParser(r, false, crReader)
-	toNextStart(t, p)
-	eq(t, p.Spaces, map[string]string{"z": "a"})
-	toNextStart(t, p)
-	eq(t, p.Spaces, map[string]string{"z": "a"})
-	toNextStart(t, p)
-	eq(t, p.Spaces, map[string]string{})
-}
-
-func TestDecodeElementDepth(t *testing.T) {
-	crReader := func(charset string, input io.Reader) (io.Reader, error) {
-		return input, nil
-	}
-	r := bytes.NewBufferString(`<root><d2>foo</d2><d2>bar</d2></root>`)
-	p := xpp.NewXMLPullParser(r, false, crReader)
-
-	type v struct{}
-
-	// move to root
-	p.NextTag()
-	eq(t, p.Name, "root")
-	eq(t, p.Depth, 1)
-
-	// decode first <d2>
-	p.NextTag()
-	eq(t, p.Name, "d2")
-	eq(t, p.Depth, 2)
-	p.DecodeElement(&v{})
-
-	// decode second <d2>
-	p.NextTag()
-	eq(t, p.Name, "d2")
-	eq(t, p.Depth, 2) // should still be 2, not 3
-	p.DecodeElement(&v{})
-}
-
-func TestDecodeElementNamespaceStack(t *testing.T) {
-	crReader := func(charset string, input io.Reader) (io.Reader, error) {
-		return input, nil
-	}
-	// The first <d2> declares its own namespace (b:w). After decoding it, that
-	// scope must be popped so the parser is back to root's namespaces.
-	r := bytes.NewBufferString(`<root xmlns:a="z"><d2 xmlns:b="w">foo</d2><d2>bar</d2></root>`)
-	p := xpp.NewXMLPullParser(r, false, crReader)
-
-	type v struct{}
-
-	p.NextTag() // root
-	eq(t, p.Spaces, map[string]string{"z": "a"})
-	lenIs(t, len(p.SpacesStack), 1)
-
-	p.NextTag() // first <d2>, adds b:w
-	eq(t, p.Spaces, map[string]string{"z": "a", "w": "b"})
-	lenIs(t, len(p.SpacesStack), 2)
-
-	p.DecodeElement(&v{})
-	// Scope must be back to root's: b:w no longer leaks and the stack shrank.
-	eq(t, p.Spaces, map[string]string{"z": "a"})
-	lenIs(t, len(p.SpacesStack), 1)
-
-	p.NextTag() // second <d2>
-	eq(t, p.Spaces, map[string]string{"z": "a"})
-}
-
-func TestXMLBase(t *testing.T) {
-	crReader := func(charset string, input io.Reader) (io.Reader, error) {
-		return input, nil
-	}
-	r := bytes.NewBufferString(`<root xml:base="https://example.org/path/"><d2 xml:base="relative">foo</d2><d2 xml:base="/absolute">bar</d2><d2>baz</d2></root>`)
-	p := xpp.NewXMLPullParser(r, false, crReader)
-
-	type v struct{}
-
-	// move to root
-	p.NextTag()
-	eq(t, p.Name, "root")
-	eq(t, p.BaseStack.Top().String(), "https://example.org/path/")
-
-	// decode first <d2>
-	p.NextTag()
-	eq(t, p.Name, "d2")
-	eq(t, p.BaseStack.Top().String(), "https://example.org/path/relative")
-
-	resolved, err := p.XmlBaseResolveUrl("test")
-	noErr(t, err)
-	eq(t, resolved.String(), "https://example.org/path/relative/test")
-	p.DecodeElement(&v{})
-
-	// decode second <d2>
-	p.NextTag()
-	eq(t, p.Name, "d2")
-	eq(t, p.BaseStack.Top().String(), "https://example.org/absolute")
-	p.DecodeElement(&v{})
-
-	// ensure xml:base is still set to root element's base
-	p.NextTag()
-	eq(t, p.Name, "d2")
-	eq(t, p.BaseStack.Top().String(), "https://example.org/path/")
-}
-
-func TestXmlBaseResolveUrlDoesNotMutateBase(t *testing.T) {
-	crReader := func(charset string, input io.Reader) (io.Reader, error) {
-		return input, nil
-	}
-	r := bytes.NewBufferString(`<root xml:base="https://example.org/a/b"><d/></root>`)
-	p := xpp.NewXMLPullParser(r, false, crReader)
-
-	p.NextTag() // root, base is https://example.org/a/b
-	before := p.BaseStack.Top().String()
-
-	resolved, err := p.XmlBaseResolveUrl("x")
-	noErr(t, err)
-	eq(t, resolved.String(), "https://example.org/a/b/x")
-
-	// The stacked base must be unchanged by the resolution.
-	eq(t, p.BaseStack.Top().String(), before)
-}
-
-func TestXmlBaseSurvivesContainerClose(t *testing.T) {
-	crReader := func(charset string, input io.Reader) (io.Reader, error) {
-		return input, nil
-	}
-	// <child> has no xml:base of its own; closing it must not discard the root's
-	// base for the following <after>.
-	r := bytes.NewBufferString(`<root xml:base="http://example.org/a/"><child></child><after></after></root>`)
-	p := xpp.NewXMLPullParser(r, false, crReader)
-
-	p.NextTag() // <root>
-	p.NextTag() // <child>
-	p.NextTag() // </child>  (processEndToken pops a base)
-	p.NextTag() // <after>
-	eq(t, p.Name, "after")
-
-	got, err := p.XmlBaseResolveUrl("rel")
-	noErr(t, err)
-	if got == nil || got.String() != "http://example.org/a/rel" {
-		t.Errorf("resolved = %v, want http://example.org/a/rel", got)
-	}
-}
-
-func toNextStart(t *testing.T, p *xpp.XMLPullParser) {
 	for {
 		tok, err := p.NextToken()
 		if err != nil {
-			t.Error(err)
-			t.FailNow()
+			t.Fatalf("advanceTo(%s): %v", name, err)
 		}
-		if tok == xpp.StartTag {
+		if tok == xpp.StartTag && p.Name() == name {
+			return
+		}
+		if tok == xpp.EndDocument {
+			t.Fatalf("advanceTo(%s): document ended", name)
+		}
+	}
+}
+
+func TestEventTypeString(t *testing.T) {
+	cases := map[xpp.EventType]string{
+		xpp.StartDocument:         "StartDocument",
+		xpp.EndDocument:           "EndDocument",
+		xpp.StartTag:              "StartTag",
+		xpp.EndTag:                "EndTag",
+		xpp.Text:                  "Text",
+		xpp.Comment:               "Comment",
+		xpp.ProcessingInstruction: "ProcessingInstruction",
+		xpp.Directive:             "Directive",
+		xpp.EventType(99):         "EventType(99)",
+	}
+	for e, want := range cases {
+		if got := e.String(); got != want {
+			t.Errorf("String(%d) = %q, want %q", int(e), got, want)
+		}
+	}
+}
+
+func TestTokenWalk(t *testing.T) {
+	p := newParser(`<?xml version="1.0"?><!-- c --><root a="1"><child>hi</child></root>`)
+
+	if p.Event() != xpp.StartDocument {
+		t.Fatalf("initial event = %v, want StartDocument", p.Event())
+	}
+
+	type step struct {
+		event xpp.EventType
+		name  string
+		text  string
+	}
+	want := []step{
+		{xpp.ProcessingInstruction, "", ""},
+		{xpp.Comment, "", " c "},
+		{xpp.StartTag, "root", ""},
+		{xpp.StartTag, "child", ""},
+		{xpp.Text, "", "hi"},
+		{xpp.EndTag, "child", ""},
+		{xpp.EndTag, "root", ""},
+		{xpp.EndDocument, "", ""},
+	}
+	for i, w := range want {
+		tok, err := p.NextToken()
+		if err != nil {
+			t.Fatalf("step %d: %v", i, err)
+		}
+		if tok != w.event || p.Event() != w.event {
+			t.Fatalf("step %d: event = %v, want %v", i, tok, w.event)
+		}
+		if w.name != "" && p.Name() != w.name {
+			t.Fatalf("step %d: name = %q, want %q", i, p.Name(), w.name)
+		}
+		if w.text != "" && p.Text() != w.text {
+			t.Fatalf("step %d: text = %q, want %q", i, p.Text(), w.text)
+		}
+	}
+}
+
+func TestNextSkipsNonContent(t *testing.T) {
+	p := newParser(`<?xml version="1.0"?><!-- c --><root><!-- inner -->x</root>`)
+
+	tok, err := p.Next()
+	if err != nil || tok != xpp.StartTag || p.Name() != "root" {
+		t.Fatalf("Next = %v %q (%v), want StartTag root", tok, p.Name(), err)
+	}
+	tok, err = p.Next()
+	if err != nil || tok != xpp.Text || p.Text() != "x" {
+		t.Fatalf("Next = %v %q (%v), want Text x", tok, p.Text(), err)
+	}
+}
+
+func TestEOFAfterEndDocument(t *testing.T) {
+	p := newParser(`<root/>`)
+	sawEnd := false
+	for i := 0; i < 10; i++ {
+		tok, err := p.NextToken()
+		if !sawEnd {
+			if err != nil {
+				t.Fatalf("call %d: unexpected error %v", i, err)
+			}
+			if tok == xpp.EndDocument {
+				sawEnd = true
+			}
+			continue
+		}
+		if !errors.Is(err, io.EOF) {
+			t.Fatalf("call %d after EndDocument: err = %v, want io.EOF", i, err)
+		}
+		if tok != xpp.EndDocument {
+			t.Fatalf("call %d after EndDocument: event = %v, want EndDocument", i, tok)
+		}
+	}
+	if !sawEnd {
+		t.Fatal("never saw EndDocument")
+	}
+	if p.Err() != nil {
+		t.Fatalf("Err() after clean EOF = %v, want nil", p.Err())
+	}
+}
+
+func TestSyntaxErrorPoisonsAndIsMatchable(t *testing.T) {
+	p := newParser(`<root><unclosed>`)
+	var last error
+	for i := 0; i < 10; i++ {
+		if _, err := p.NextToken(); err != nil {
+			last = err
 			break
 		}
 	}
-}
-
-func TestNextText(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected string
-		wantErr  bool
-	}{
-		{
-			name:     "simple text",
-			input:    "<root>simple text</root>",
-			expected: "simple text",
-			wantErr:  false,
-		},
-		{
-			name:     "empty text",
-			input:    "<root></root>",
-			expected: "",
-			wantErr:  false,
-		},
-		{
-			name:     "mixed content",
-			input:    "<root>text<child/>text2</root>",
-			expected: "",
-			wantErr:  true,
-		},
-		{
-			name:     "whitespace text",
-			input:    "<root>  \t\n  </root>",
-			expected: "  \t\n  ",
-			wantErr:  false,
-		},
+	if last == nil {
+		t.Fatal("truncated document produced no error")
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			p := xpp.NewXMLPullParser(bytes.NewBufferString(tt.input), true, nil)
-
-			// Move to first start tag
-			_, err := p.NextTag()
-			noErr(t, err)
-
-			result, err := p.NextText()
-			if tt.wantErr {
-				hasErr(t, err)
-				return
-			}
-
-			noErr(t, err)
-			eq(t, result, tt.expected)
-		})
+	var serr *xml.SyntaxError
+	if !errors.As(last, &serr) {
+		t.Fatalf("error %v is not matchable as *xml.SyntaxError", last)
+	}
+	if p.Err() == nil {
+		t.Fatal("Err() should be sticky after a decoder error")
+	}
+	if _, err := p.NextToken(); err == nil {
+		t.Fatal("NextToken after decoder error should keep failing")
 	}
 }
 
-func TestSkip(t *testing.T) {
-	tests := []struct {
-		name    string
-		input   string
-		wantErr bool
-	}{
-		{
-			name: "skip simple element",
-			input: `<root>
-						<skip>content to skip</skip>
-						<keep>content to keep</keep>
-					</root>`,
-			wantErr: false,
-		},
-		{
-			name: "skip nested elements",
-			input: `<root>
-						<skip>
-							<child1>skip this</child1>
-							<child2>and this</child2>
-						</skip>
-						<keep>content to keep</keep>
-					</root>`,
-			wantErr: false,
-		},
-		{
-			name: "skip with attributes",
-			input: `<root>
-						<skip attr="value">
-							<child attr2="value2">skip this</child>
-						</skip>
-						<keep>content to keep</keep>
-					</root>`,
-			wantErr: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			p := xpp.NewXMLPullParser(bytes.NewBufferString(tt.input), true, nil)
-
-			// Move to root
-			_, err := p.NextTag()
-			noErr(t, err)
-
-			// Move to skip element
-			_, err = p.NextTag()
-			noErr(t, err)
-
-			// Skip the element
-			err = p.Skip()
-			if tt.wantErr {
-				hasErr(t, err)
-				return
-			}
-			noErr(t, err)
-
-			// Verify we're at the keep element
-			_, err = p.NextTag()
-			noErr(t, err)
-			eq(t, p.Name, "keep")
-		})
-	}
-}
-
-func TestSpecialCases(t *testing.T) {
-	tests := []struct {
-		name          string
-		input         string
-		expectedTypes []xpp.XMLEventType
-	}{
-		{
-			name:  "processing instruction",
-			input: `<?target data?><root/>`,
-			expectedTypes: []xpp.XMLEventType{
-				xpp.ProcessingInstruction,
-				xpp.StartTag,
-				xpp.EndTag,
-				xpp.EndDocument,
-			},
-		},
-		{
-			name:  "comments",
-			input: `<!-- comment --><root/>`,
-			expectedTypes: []xpp.XMLEventType{
-				xpp.Comment,
-				xpp.StartTag,
-				xpp.EndTag,
-				xpp.EndDocument,
-			},
-		},
-		{
-			name:  "mixed content",
-			input: `<root>text<child/>text</root>`,
-			expectedTypes: []xpp.XMLEventType{
-				xpp.StartTag,
-				xpp.Text,
-				xpp.StartTag,
-				xpp.EndTag,
-				xpp.Text,
-				xpp.EndTag,
-				xpp.EndDocument,
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Logf("Starting test case: %s with input: %s", tt.name, tt.input)
-			p := xpp.NewXMLPullParser(bytes.NewBufferString(tt.input), true, nil)
-
-			var events []xpp.XMLEventType
-			for {
-				event, err := p.NextToken()
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				events = append(events, event)
-				t.Logf("Event: %s (Name: %s, Text: %q)", p.EventName(event), p.Name, p.Text)
-
-				// Stop when we reach EndDocument
-				if event == xpp.EndDocument {
-					break
-				}
-			}
-
-			eq(t, events, tt.expectedTypes)
-		})
-	}
-}
-
-// A DecodeElement unmarshal error leaves the decoder mid-element. The parser
-// must refuse to continue rather than run with desynced stacks, which used to
-// end in a slice-bounds panic at the enclosing end tags (issue #28).
 func TestDecodeElementErrorPoisonsParser(t *testing.T) {
 	doc := `<root><d2><inner><n>notanumber</n><m>y</m></inner></d2><d3/></root>`
-	p := xpp.NewXMLPullParser(bytes.NewReader([]byte(doc)), false, nil)
-
-	// Position on <d2>.
-	for {
-		tok, err := p.NextToken()
-		if err != nil {
-			t.Fatalf("setup: %v", err)
-		}
-		if tok == xpp.StartTag && p.Name == "d2" {
-			break
-		}
-	}
+	p := newParser(doc)
+	advanceTo(t, p, "d2")
 
 	var v struct {
 		Inner struct {
@@ -442,40 +172,27 @@ func TestDecodeElementErrorPoisonsParser(t *testing.T) {
 	if err := p.DecodeElement(&v); err == nil {
 		t.Fatal("DecodeElement should fail on notanumber -> int")
 	}
-
-	// Every subsequent call must return an error; pulling tokens through the
-	// rest of the document must not panic at </d2> or </root>.
+	if p.Err() == nil {
+		t.Fatal("Err() should be set after failed DecodeElement")
+	}
 	for i := 0; i < 20; i++ {
 		if _, err := p.NextToken(); err == nil {
 			t.Fatalf("NextToken call %d after failed DecodeElement should error", i)
 		}
 	}
-	if _, err := p.Next(); err == nil {
-		t.Fatal("Next after failed DecodeElement should error")
-	}
 	if _, err := p.NextTag(); err == nil {
 		t.Fatal("NextTag after failed DecodeElement should error")
 	}
-	if err := p.Skip(); err == nil {
-		t.Fatal("Skip after failed DecodeElement should error")
+	if err := p.DecodeElement(&v); err == nil {
+		t.Fatal("DecodeElement after poison should error")
 	}
 }
 
-// A successful DecodeElement must not set the sticky error; the parser
-// continues normally.
-func TestDecodeElementSuccessDoesNotPoison(t *testing.T) {
-	doc := `<root><d2><n>42</n></d2><d3>x</d3></root>`
-	p := xpp.NewXMLPullParser(bytes.NewReader([]byte(doc)), false, nil)
-
-	for {
-		tok, err := p.NextToken()
-		if err != nil {
-			t.Fatalf("setup: %v", err)
-		}
-		if tok == xpp.StartTag && p.Name == "d2" {
-			break
-		}
-	}
+func TestDecodeElementSuccess(t *testing.T) {
+	doc := `<root xmlns:a="http://ns"><a:x><n>42</n></a:x><d3>y</d3></root>`
+	p := newParser(doc)
+	advanceTo(t, p, "x")
+	startDepth := p.Depth()
 
 	var v struct {
 		N int `xml:"n"`
@@ -486,93 +203,409 @@ func TestDecodeElementSuccessDoesNotPoison(t *testing.T) {
 	if v.N != 42 {
 		t.Fatalf("N = %d, want 42", v.N)
 	}
+	if p.Event() != xpp.EndTag || p.Name() != "x" || p.Space() != "http://ns" {
+		t.Fatalf("cursor = %v %q space %q, want EndTag x http://ns", p.Event(), p.Name(), p.Space())
+	}
+	if p.Depth() != startDepth {
+		t.Fatalf("Depth on synthetic EndTag = %d, want %d", p.Depth(), startDepth)
+	}
+	if p.Err() != nil {
+		t.Fatalf("Err() after successful DecodeElement = %v", p.Err())
+	}
 
 	tok, err := p.NextTag()
-	if err != nil {
-		t.Fatalf("NextTag after successful DecodeElement: %v", err)
-	}
-	if tok != xpp.StartTag || p.Name != "d3" {
-		t.Fatalf("got %s %q, want StartTag d3", p.EventName(tok), p.Name)
+	if err != nil || tok != xpp.StartTag || p.Name() != "d3" {
+		t.Fatalf("NextTag = %v %q (%v), want StartTag d3", tok, p.Name(), err)
 	}
 }
 
-// EndTag events must carry the element's namespace so ExpectAll can validate
-// end tags (issue #29).
-func TestEndTagSpacePopulated(t *testing.T) {
-	doc := `<a:x xmlns:a="http://ns">v</a:x>`
-	p := xpp.NewXMLPullParser(bytes.NewReader([]byte(doc)), false, nil)
+func TestDecodeElementPrecondition(t *testing.T) {
+	p := newParser(`<root>text</root>`)
+	advanceTo(t, p, "root")
+	if _, err := p.Next(); err != nil { // on Text
+		t.Fatal(err)
+	}
+	var v struct{}
+	err := p.DecodeElement(&v)
+	var ee *xpp.ExpectError
+	if !errors.As(err, &ee) {
+		t.Fatalf("err = %v, want *ExpectError", err)
+	}
+	if ee.WantEvent != xpp.StartTag || ee.GotEvent != xpp.Text {
+		t.Fatalf("ExpectError = %+v, want StartTag/Text", ee)
+	}
+}
 
+func TestDepthEndTagMatchesStartTag(t *testing.T) {
+	p := newParser(`<a><b><c/></b></a>`)
+	depths := map[string][2]int{} // name -> [start, end]
 	for {
 		tok, err := p.NextToken()
 		if err != nil {
-			t.Fatalf("next: %v", err)
+			t.Fatal(err)
+		}
+		if tok == xpp.StartTag {
+			d := depths[p.Name()]
+			d[0] = p.Depth()
+			depths[p.Name()] = d
 		}
 		if tok == xpp.EndTag {
-			break
+			d := depths[p.Name()]
+			d[1] = p.Depth()
+			depths[p.Name()] = d
 		}
 		if tok == xpp.EndDocument {
-			t.Fatal("no end tag seen")
+			break
 		}
 	}
-
-	if p.Space != "http://ns" {
-		t.Fatalf("Space on EndTag = %q, want %q", p.Space, "http://ns")
-	}
-	if err := p.ExpectAll(xpp.EndTag, "http://ns", "x"); err != nil {
-		t.Fatalf("ExpectAll on end tag: %v", err)
+	want := map[string][2]int{"a": {1, 1}, "b": {2, 2}, "c": {3, 3}}
+	for name, w := range want {
+		if depths[name] != w {
+			t.Errorf("depths[%s] = %v, want %v", name, depths[name], w)
+		}
 	}
 }
 
-// The synthetic EndTag left behind by DecodeElement must carry the decoded
-// element's namespace too.
-func TestDecodeElementEndTagSpace(t *testing.T) {
-	doc := `<root xmlns:a="http://ns"><a:x><n>1</n></a:x></root>`
-	p := xpp.NewXMLPullParser(bytes.NewReader([]byte(doc)), false, nil)
+func TestNamespaces(t *testing.T) {
+	doc := `<root xmlns:DC="http://purl.org/dc" xmlns="http://default"><DC:title/></root>`
+	p := newParser(doc)
+	advanceTo(t, p, "title")
 
-	for {
-		tok, err := p.NextToken()
-		if err != nil {
-			t.Fatalf("next: %v", err)
-		}
-		if tok == xpp.StartTag && p.Name == "x" {
-			break
-		}
+	ns := p.Namespaces()
+	if ns["DC"] != "http://purl.org/dc" {
+		t.Fatalf("Namespaces()[DC] = %q, want the URI with prefix case preserved", ns["DC"])
 	}
+	if ns[""] != "http://default" {
+		t.Fatalf("default namespace = %q, want http://default", ns[""])
+	}
+
+	// Snapshot: mutating the returned map must not affect the parser.
+	ns["DC"] = "corrupted"
+	if got := p.Namespaces()["DC"]; got != "http://purl.org/dc" {
+		t.Fatalf("parser bindings mutated through snapshot: %q", got)
+	}
+}
+
+func TestDuplicateBindingsNotLossy(t *testing.T) {
+	doc := `<root xmlns:a="http://ns" xmlns:b="http://ns"><a:x/></root>`
+	p := newParser(doc)
+	advanceTo(t, p, "x")
+
+	ns := p.Namespaces()
+	if ns["a"] != "http://ns" || ns["b"] != "http://ns" {
+		t.Fatalf("both prefixes must be bound: %v", ns)
+	}
+	// Most recently declared prefix wins the reverse lookup.
+	prefix, ok := p.PrefixForURI("http://ns")
+	if !ok || prefix != "b" {
+		t.Fatalf("PrefixForURI = %q %v, want b true", prefix, ok)
+	}
+}
+
+func TestPrefixForURI(t *testing.T) {
+	doc := `<root xmlns:out="http://u1"><mid xmlns:in="http://u1"><leaf/></mid></root>`
+	p := newParser(doc)
+	advanceTo(t, p, "leaf")
+
+	// Innermost declaration wins.
+	prefix, ok := p.PrefixForURI("http://u1")
+	if !ok || prefix != "in" {
+		t.Fatalf("PrefixForURI = %q %v, want in true", prefix, ok)
+	}
+	if _, ok := p.PrefixForURI("http://unbound"); ok {
+		t.Fatal("PrefixForURI for unbound URI should report ok=false")
+	}
+	// Whitespace in the query is tolerated, matching declaration trimming.
+	if prefix, ok := p.PrefixForURI(" http://u1 "); !ok || prefix != "in" {
+		t.Fatalf("trimmed lookup = %q %v, want in true", prefix, ok)
+	}
+}
+
+func TestPrefixForURIShadowed(t *testing.T) {
+	// Prefix a is rebound to a different URI in the inner scope, so it is
+	// no longer an in-scope prefix for the outer URI.
+	doc := `<root xmlns:a="http://u1"><mid xmlns:a="http://u2"><leaf/></mid></root>`
+	p := newParser(doc)
+	advanceTo(t, p, "leaf")
+
+	if _, ok := p.PrefixForURI("http://u1"); ok {
+		t.Fatal("shadowed binding should not be returned")
+	}
+	if prefix, ok := p.PrefixForURI("http://u2"); !ok || prefix != "a" {
+		t.Fatalf("PrefixForURI(u2) = %q %v, want a true", prefix, ok)
+	}
+}
+
+func TestBaseURLNestedResolution(t *testing.T) {
+	// A file-like base must resolve per RFC 3986: the last path segment is
+	// replaced, not treated as a directory.
+	doc := `<root xml:base="http://example.org/dir/file.xml"><mid xml:base="other/"><leaf/></mid></root>`
+	p := newParser(doc)
+	advanceTo(t, p, "leaf")
+
+	base := p.BaseURL()
+	if base == nil {
+		t.Fatal("BaseURL = nil")
+	}
+	if got := base.String(); got != "http://example.org/dir/other/" {
+		t.Fatalf("BaseURL = %q, want http://example.org/dir/other/", got)
+	}
+}
+
+func TestBaseURLScopes(t *testing.T) {
+	doc := `<root xml:base="http://a/"><mid xml:base="http://b/"><leaf/></mid><sib/></root>`
+	p := newParser(doc)
+
+	advanceTo(t, p, "leaf")
+	if got := p.BaseURL().String(); got != "http://b/" {
+		t.Fatalf("leaf base = %q, want http://b/", got)
+	}
+
+	// On mid's end tag, the base still describes mid.
+	if _, err := p.NextToken(); err != nil { // </leaf>
+		t.Fatal(err)
+	}
+	if _, err := p.NextToken(); err != nil { // </mid>
+		t.Fatal(err)
+	}
+	if p.Event() != xpp.EndTag || p.Name() != "mid" {
+		t.Fatalf("cursor = %v %q, want EndTag mid", p.Event(), p.Name())
+	}
+	if got := p.BaseURL().String(); got != "http://b/" {
+		t.Fatalf("base on </mid> = %q, want http://b/", got)
+	}
+
+	// On the sibling, the scope has popped back to root's base.
+	advanceTo(t, p, "sib")
+	if got := p.BaseURL().String(); got != "http://a/" {
+		t.Fatalf("sib base = %q, want http://a/", got)
+	}
+}
+
+func TestBaseURLAfterDecodeElement(t *testing.T) {
+	doc := `<root xml:base="http://a/"><item xml:base="sub/"><n>1</n></item><next/></root>`
+	p := newParser(doc)
+	advanceTo(t, p, "item")
 
 	var v struct {
 		N int `xml:"n"`
 	}
 	if err := p.DecodeElement(&v); err != nil {
-		t.Fatalf("DecodeElement: %v", err)
+		t.Fatal(err)
 	}
-	if err := p.ExpectAll(xpp.EndTag, "http://ns", "x"); err != nil {
-		t.Fatalf("ExpectAll on synthetic end tag: %v", err)
+	// The cursor sits on item's end tag; the base still describes item.
+	if got := p.BaseURL().String(); got != "http://a/sub/" {
+		t.Fatalf("base after DecodeElement = %q, want http://a/sub/", got)
+	}
+	advanceTo(t, p, "next")
+	if got := p.BaseURL().String(); got != "http://a/" {
+		t.Fatalf("base on sibling = %q, want http://a/", got)
 	}
 }
 
-// A foreign-namespaced attribute must not shadow the plain attribute with
-// the same local name (issue #31).
-func TestAttributePrefersUnNamespaced(t *testing.T) {
-	doc := `<root xmlns:o="http://other" o:href="WRONG" href="right"/>`
-	p := xpp.NewXMLPullParser(bytes.NewReader([]byte(doc)), false, nil)
-
-	if _, err := p.NextTag(); err != nil {
-		t.Fatalf("next: %v", err)
+func TestBaseURLUnparseableInherits(t *testing.T) {
+	doc := "<root xml:base=\"http://a/\"><mid xml:base=\"http://bad url\x7f::\"><leaf/></mid></root>"
+	p := newParser(doc)
+	advanceTo(t, p, "leaf")
+	base := p.BaseURL()
+	if base == nil || base.String() != "http://a/" {
+		t.Fatalf("base = %v, want inherited http://a/", base)
 	}
+}
+
+func TestBaseURLAbsent(t *testing.T) {
+	p := newParser(`<root><leaf/></root>`)
+	advanceTo(t, p, "leaf")
+	if p.BaseURL() != nil {
+		t.Fatalf("BaseURL = %v, want nil", p.BaseURL())
+	}
+}
+
+func TestExpect(t *testing.T) {
+	doc := `<a:Root xmlns:a="http://NS">v</a:Root>`
+	p := newParser(doc)
+	advanceTo(t, p, "Root")
+
+	// Case-insensitive name and space, wildcard forms.
+	if err := p.Expect(xpp.StartTag, "root"); err != nil {
+		t.Fatalf("Expect fold: %v", err)
+	}
+	if err := p.ExpectAll(xpp.StartTag, "http://ns", "ROOT"); err != nil {
+		t.Fatalf("ExpectAll fold: %v", err)
+	}
+	if err := p.ExpectAll(xpp.StartTag, "*", "*"); err != nil {
+		t.Fatalf("ExpectAll wildcard: %v", err)
+	}
+
+	err := p.Expect(xpp.EndTag, "root")
+	var ee *xpp.ExpectError
+	if !errors.As(err, &ee) {
+		t.Fatalf("err = %v, want *ExpectError", err)
+	}
+	if ee.WantEvent != xpp.EndTag || ee.GotEvent != xpp.StartTag || ee.GotName != "Root" {
+		t.Fatalf("ExpectError fields = %+v", ee)
+	}
+	if !strings.Contains(err.Error(), "EndTag") || !strings.Contains(err.Error(), "StartTag") {
+		t.Fatalf("Error() = %q, should mention both events", err.Error())
+	}
+
+	// End-tag namespace validation works (Space is populated on EndTag).
+	if _, err := p.Next(); err != nil { // Text
+		t.Fatal(err)
+	}
+	if _, err := p.Next(); err != nil { // EndTag
+		t.Fatal(err)
+	}
+	if err := p.ExpectAll(xpp.EndTag, "http://ns", "root"); err != nil {
+		t.Fatalf("ExpectAll on end tag: %v", err)
+	}
+}
+
+func TestNextTag(t *testing.T) {
+	p := newParser("<root>\n  <child/>\n</root>")
+	advanceTo(t, p, "root")
+
+	tok, err := p.NextTag()
+	if err != nil || tok != xpp.StartTag || p.Name() != "child" {
+		t.Fatalf("NextTag = %v %q (%v), want StartTag child", tok, p.Name(), err)
+	}
+
+	p2 := newParser(`<root>real text</root>`)
+	advanceTo(t, p2, "root")
+	_, err = p2.NextTag()
+	var ee *xpp.ExpectError
+	if !errors.As(err, &ee) {
+		t.Fatalf("NextTag on text: err = %v, want *ExpectError", err)
+	}
+}
+
+func TestNextText(t *testing.T) {
+	p := newParser(`<root>a &amp; b<![CDATA[ & c]]></root>`)
+	advanceTo(t, p, "root")
+	text, err := p.NextText()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text != "a & b & c" {
+		t.Fatalf("NextText = %q, want %q", text, "a & b & c")
+	}
+	if p.Event() != xpp.EndTag {
+		t.Fatalf("cursor after NextText = %v, want EndTag", p.Event())
+	}
+}
+
+func TestNextTextPreconditionAndMixedContent(t *testing.T) {
+	p := newParser(`<root>t</root>`)
+	if _, err := p.NextText(); err == nil {
+		t.Fatal("NextText before StartTag should error")
+	}
+
+	p2 := newParser(`<root>text<child/></root>`)
+	advanceTo(t, p2, "root")
+	_, err := p2.NextText()
+	var ee *xpp.ExpectError
+	if !errors.As(err, &ee) {
+		t.Fatalf("NextText on mixed content: err = %v, want *ExpectError", err)
+	}
+}
+
+func TestSkip(t *testing.T) {
+	doc := `<root><skipme><deep><deeper/></deep>text</skipme><after/></root>`
+	p := newParser(doc)
+	advanceTo(t, p, "skipme")
+
+	if err := p.Skip(); err != nil {
+		t.Fatal(err)
+	}
+	if p.Event() != xpp.EndTag || p.Name() != "skipme" {
+		t.Fatalf("cursor after Skip = %v %q, want EndTag skipme", p.Event(), p.Name())
+	}
+	tok, err := p.NextTag()
+	if err != nil || tok != xpp.StartTag || p.Name() != "after" {
+		t.Fatalf("after Skip: %v %q (%v), want StartTag after", tok, p.Name(), err)
+	}
+}
+
+func TestSkipPrecondition(t *testing.T) {
+	p := newParser(`<root><a/></root>`)
+	advanceTo(t, p, "a")
+	// Advance to </a>.
+	if _, err := p.NextToken(); err != nil {
+		t.Fatal(err)
+	}
+	err := p.Skip()
+	var ee *xpp.ExpectError
+	if !errors.As(err, &ee) {
+		t.Fatalf("Skip on EndTag: err = %v, want *ExpectError", err)
+	}
+	if ee.WantEvent != xpp.StartTag || ee.GotEvent != xpp.EndTag {
+		t.Fatalf("ExpectError fields = %+v", ee)
+	}
+}
+
+func TestAttributePreference(t *testing.T) {
+	doc := `<root xmlns:o="http://other" o:href="WRONG" href="right" o:only="fallback"/>`
+	p := newParser(doc)
+	advanceTo(t, p, "root")
+
 	if got := p.Attribute("href"); got != "right" {
-		t.Fatalf("Attribute(href) = %q, want %q", got, "right")
+		t.Fatalf("Attribute(href) = %q, want right", got)
+	}
+	if got := p.Attribute("only"); got != "fallback" {
+		t.Fatalf("Attribute(only) = %q, want fallback", got)
+	}
+	if got := p.Attribute("absent"); got != "" {
+		t.Fatalf("Attribute(absent) = %q, want empty", got)
 	}
 }
 
-// When only a namespaced attribute exists it is still returned by local name.
-func TestAttributeNamespacedFallback(t *testing.T) {
-	doc := `<root xmlns:o="http://other" o:href="only"/>`
-	p := xpp.NewXMLPullParser(bytes.NewReader([]byte(doc)), false, nil)
+func TestAttrsLiveMutation(t *testing.T) {
+	// gofeed rewrites attribute values in place to resolve relative URLs;
+	// the live-slice contract makes later reads see the modification.
+	p := newParser(`<root href="relative.html"/>`)
+	advanceTo(t, p, "root")
 
-	if _, err := p.NextTag(); err != nil {
-		t.Fatalf("next: %v", err)
+	attrs := p.Attrs()
+	for i := range attrs {
+		if attrs[i].Name.Local == "href" {
+			attrs[i].Value = "http://example.org/absolute.html"
+		}
 	}
-	if got := p.Attribute("href"); got != "only" {
-		t.Fatalf("Attribute(href) = %q, want %q", got, "only")
+	if got := p.Attribute("href"); got != "http://example.org/absolute.html" {
+		t.Fatalf("Attribute after mutation = %q, want the rewritten value", got)
+	}
+}
+
+func TestZeroValueParser(t *testing.T) {
+	var p xpp.Parser
+	if _, err := p.NextToken(); err == nil {
+		t.Fatal("zero-value parser should error, not panic")
+	}
+	if p.Err() == nil {
+		t.Fatal("zero-value parser error should be sticky")
+	}
+	if p.BaseURL() != nil || p.Attribute("x") != "" || p.Depth() != 0 {
+		t.Fatal("zero-value accessors should return zero values")
+	}
+}
+
+func TestInputOffset(t *testing.T) {
+	p := newParser(`<root><child/></root>`)
+	advanceTo(t, p, "root")
+	first := p.InputOffset()
+	advanceTo(t, p, "child")
+	if p.InputOffset() <= first {
+		t.Fatalf("InputOffset did not progress: %d then %d", first, p.InputOffset())
+	}
+}
+
+func TestIsWhitespace(t *testing.T) {
+	p := newParser("<root>  \n\t </root>")
+	advanceTo(t, p, "root")
+	if _, err := p.NextToken(); err != nil {
+		t.Fatal(err)
+	}
+	if p.Event() != xpp.Text || !p.IsWhitespace() {
+		t.Fatalf("event %v IsWhitespace %v, want whitespace Text", p.Event(), p.IsWhitespace())
 	}
 }
