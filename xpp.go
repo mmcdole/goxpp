@@ -337,12 +337,16 @@ func (p *XMLPullParser) XmlBaseResolveUrl(u string) (*url.URL, error) {
 	if err != nil {
 		return nil, err
 	}
-	if curr.Path != "" && u != "" && curr.Path[len(curr.Path)-1] != '/' {
+	// Work on a copy: curr is the live base held on the stack, so appending "/"
+	// to it would rewrite the base for every sibling resolved after the first
+	// relative URL in this scope.
+	base := *curr
+	if base.Path != "" && u != "" && base.Path[len(base.Path)-1] != '/' {
 		// There's no reason someone would use a path in xml:base if they
 		// didn't mean for it to be a directory
-		curr.Path = curr.Path + "/"
+		base.Path = base.Path + "/"
 	}
-	absURL := curr.ResolveReference(relURL)
+	absURL := base.ResolveReference(relURL)
 	return absURL, nil
 }
 
