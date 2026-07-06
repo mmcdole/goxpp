@@ -197,6 +197,28 @@ func TestXmlBaseResolveUrlDoesNotMutateBase(t *testing.T) {
 	eq(t, p.BaseStack.Top().String(), before)
 }
 
+func TestXmlBaseSurvivesContainerClose(t *testing.T) {
+	crReader := func(charset string, input io.Reader) (io.Reader, error) {
+		return input, nil
+	}
+	// <child> has no xml:base of its own; closing it must not discard the root's
+	// base for the following <after>.
+	r := bytes.NewBufferString(`<root xml:base="http://example.org/a/"><child></child><after></after></root>`)
+	p := xpp.NewXMLPullParser(r, false, crReader)
+
+	p.NextTag() // <root>
+	p.NextTag() // <child>
+	p.NextTag() // </child>  (processEndToken pops a base)
+	p.NextTag() // <after>
+	eq(t, p.Name, "after")
+
+	got, err := p.XmlBaseResolveUrl("rel")
+	noErr(t, err)
+	if got == nil || got.String() != "http://example.org/a/rel" {
+		t.Errorf("resolved = %v, want http://example.org/a/rel", got)
+	}
+}
+
 func toNextStart(t *testing.T, p *xpp.XMLPullParser) {
 	for {
 		tok, err := p.NextToken()
