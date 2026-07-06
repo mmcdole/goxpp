@@ -65,6 +65,11 @@ type XMLPullParser struct {
 
 	decoder *xml.Decoder
 	token   interface{}
+	// err is sticky: once the parser state can no longer be trusted (a
+	// DecodeElement error left the decoder somewhere inside an element),
+	// every subsequent token call returns it instead of running on
+	// desynced Depth/SpacesStack/BaseStack state.
+	err error
 }
 
 func NewXMLPullParser(r io.Reader, strict bool, cr CharsetReader) *XMLPullParser {
@@ -131,6 +136,10 @@ func (p *XMLPullParser) Next() (event XMLEventType, err error) {
 }
 
 func (p *XMLPullParser) NextToken() (event XMLEventType, err error) {
+	if p.err != nil {
+		return p.Event, p.err
+	}
+
 	// Clear any state held for the previous token
 	p.resetTokenState()
 
@@ -245,6 +254,12 @@ func (p *XMLPullParser) DecodeElement(v interface{}) error {
 	// Consumes all tokens until the matching end token.
 	err := p.decoder.DecodeElement(v, &startToken)
 	if err != nil {
+		// The decoder stopped somewhere inside the element, so an unknown
+		// number of tokens was consumed and Depth, SpacesStack and BaseStack
+		// no longer match the decoder's position. The parser cannot safely
+		// continue; poison it so subsequent calls error instead of popping
+		// stacks for elements they never saw opened.
+		p.err = fmt.Errorf("parser state desynced by DecodeElement error: %w", err)
 		return err
 	}
 
@@ -379,7 +394,11 @@ func (p *XMLPullParser) processStartToken(t xml.StartElement) {
 
 func (p *XMLPullParser) processEndToken(t xml.EndElement) {
 	p.Depth--
-	p.SpacesStack = p.SpacesStack[:len(p.SpacesStack)-1]
+	// Guard the pop: an end tag without a tracked start (possible only if
+	// internal invariants were violated) must not panic.
+	if len(p.SpacesStack) > 0 {
+		p.SpacesStack = p.SpacesStack[:len(p.SpacesStack)-1]
+	}
 	if len(p.SpacesStack) == 0 {
 		p.Spaces = map[string]string{}
 	} else {

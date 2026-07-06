@@ -415,3 +415,83 @@ func TestSpecialCases(t *testing.T) {
 		})
 	}
 }
+
+// A DecodeElement unmarshal error leaves the decoder mid-element. The parser
+// must refuse to continue rather than run with desynced stacks, which used to
+// end in a slice-bounds panic at the enclosing end tags (issue #28).
+func TestDecodeElementErrorPoisonsParser(t *testing.T) {
+	doc := `<root><d2><inner><n>notanumber</n><m>y</m></inner></d2><d3/></root>`
+	p := xpp.NewXMLPullParser(bytes.NewReader([]byte(doc)), false, nil)
+
+	// Position on <d2>.
+	for {
+		tok, err := p.NextToken()
+		if err != nil {
+			t.Fatalf("setup: %v", err)
+		}
+		if tok == xpp.StartTag && p.Name == "d2" {
+			break
+		}
+	}
+
+	var v struct {
+		Inner struct {
+			N int `xml:"n"`
+		} `xml:"inner"`
+	}
+	if err := p.DecodeElement(&v); err == nil {
+		t.Fatal("DecodeElement should fail on notanumber -> int")
+	}
+
+	// Every subsequent call must return an error; pulling tokens through the
+	// rest of the document must not panic at </d2> or </root>.
+	for i := 0; i < 20; i++ {
+		if _, err := p.NextToken(); err == nil {
+			t.Fatalf("NextToken call %d after failed DecodeElement should error", i)
+		}
+	}
+	if _, err := p.Next(); err == nil {
+		t.Fatal("Next after failed DecodeElement should error")
+	}
+	if _, err := p.NextTag(); err == nil {
+		t.Fatal("NextTag after failed DecodeElement should error")
+	}
+	if err := p.Skip(); err == nil {
+		t.Fatal("Skip after failed DecodeElement should error")
+	}
+}
+
+// A successful DecodeElement must not set the sticky error; the parser
+// continues normally.
+func TestDecodeElementSuccessDoesNotPoison(t *testing.T) {
+	doc := `<root><d2><n>42</n></d2><d3>x</d3></root>`
+	p := xpp.NewXMLPullParser(bytes.NewReader([]byte(doc)), false, nil)
+
+	for {
+		tok, err := p.NextToken()
+		if err != nil {
+			t.Fatalf("setup: %v", err)
+		}
+		if tok == xpp.StartTag && p.Name == "d2" {
+			break
+		}
+	}
+
+	var v struct {
+		N int `xml:"n"`
+	}
+	if err := p.DecodeElement(&v); err != nil {
+		t.Fatalf("DecodeElement: %v", err)
+	}
+	if v.N != 42 {
+		t.Fatalf("N = %d, want 42", v.N)
+	}
+
+	tok, err := p.NextTag()
+	if err != nil {
+		t.Fatalf("NextTag after successful DecodeElement: %v", err)
+	}
+	if tok != xpp.StartTag || p.Name != "d3" {
+		t.Fatalf("got %s %q, want StartTag d3", p.EventName(tok), p.Name)
+	}
+}
